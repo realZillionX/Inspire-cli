@@ -843,3 +843,38 @@ class TestProxyCommand:
 
         assert "Host mybridge" in ssh_config
         assert f"ProxyCommand {expected_proxy}" in ssh_config
+
+    def test_get_proxy_command_injects_rtunnel_proxy_override(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bridge = BridgeProfile(
+            name="test",
+            proxy_url="https://proxy.example.com/tunnel",
+        )
+        rtunnel_bin = tmp_path / "rtunnel"
+        monkeypatch.setenv("INSPIRE_RTUNNEL_PROXY", "socks5://127.0.0.1:1080")
+
+        cmd = _get_proxy_command(bridge, rtunnel_bin, quiet=False)
+
+        assert "HTTP_PROXY=socks5://127.0.0.1:1080" in cmd
+        assert "HTTPS_PROXY=socks5://127.0.0.1:1080" in cmd
+        assert "wss://proxy.example.com/tunnel" in cmd
+
+    def test_get_proxy_command_auto_splits_qizhi_proxy(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bridge = BridgeProfile(
+            name="test",
+            proxy_url="https://proxy.example.com/tunnel",
+        )
+        rtunnel_bin = tmp_path / "rtunnel"
+        monkeypatch.setenv("INSPIRE_BASE_URL", "https://qz.sii.edu.cn")
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:8888")
+
+        cmd = _get_proxy_command(bridge, rtunnel_bin, quiet=False)
+
+        assert "HTTP_PROXY=socks5://127.0.0.1:1080" in cmd

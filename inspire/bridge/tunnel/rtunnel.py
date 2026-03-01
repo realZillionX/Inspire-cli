@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,27 @@ from .models import TunnelConfig, TunnelError
 
 # nightly release includes stdio:// mode for SSH ProxyCommand support
 DEFAULT_RTUNNEL_DOWNLOAD_URL = CONFIG_DEFAULT_RTUNNEL_DOWNLOAD_URL
+
+
+def _is_rtunnel_binary_usable(path: Path) -> bool:
+    """Return True when *path* exists, is executable, and can be launched."""
+    if not path.exists() or not os.access(path, os.X_OK):
+        return False
+
+    try:
+        # `--version` is a lightweight health check and catches exec-format errors.
+        result = subprocess.run(
+            [str(path), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
+    # Some builds may return non-zero for --version while still being executable.
+    return result.returncode in {0, 1, 2}
 
 
 def _get_rtunnel_download_url() -> str:
@@ -35,8 +57,11 @@ def _get_rtunnel_download_url() -> str:
 
 def _ensure_rtunnel_binary(config: TunnelConfig) -> Path:
     """Ensure rtunnel binary exists, download if needed."""
-    if config.rtunnel_bin.exists() and os.access(config.rtunnel_bin, os.X_OK):
+    if _is_rtunnel_binary_usable(config.rtunnel_bin):
         return config.rtunnel_bin
+
+    if config.rtunnel_bin.exists():
+        config.rtunnel_bin.unlink(missing_ok=True)
 
     # Download rtunnel
     config.rtunnel_bin.parent.mkdir(parents=True, exist_ok=True)
@@ -45,25 +70,38 @@ def _ensure_rtunnel_binary(config: TunnelConfig) -> Path:
         import tarfile
         import tempfile
         import urllib.request
+        import zipfile
 
+        download_url = _get_rtunnel_download_url()
+        archive_suffix = ".zip" if download_url.lower().endswith(".zip") else ".tar.gz"
         # Download tar.gz and extract
-        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-            urllib.request.urlretrieve(_get_rtunnel_download_url(), tmp.name)
-            with tarfile.open(tmp.name, "r:gz") as tar:
-                # Extract the rtunnel binary (should be the only file or named rtunnel*)
-                for member in tar.getmembers():
-                    if member.isfile() and "rtunnel" in member.name:
-                        # Extract to a temp location first
-                        extracted = tar.extractfile(member)
-                        if extracted:
-                            config.rtunnel_bin.write_bytes(extracted.read())
-                            config.rtunnel_bin.chmod(0o755)
-                            break
+        with tempfile.NamedTemporaryFile(suffix=archive_suffix, delete=False) as tmp:
+            urllib.request.urlretrieve(download_url, tmp.name)
+
+            if archive_suffix == ".zip":
+                with zipfile.ZipFile(tmp.name) as archive:
+                    for member in archive.namelist():
+                        if member.endswith("/") or "rtunnel" not in member:
+                            continue
+                        config.rtunnel_bin.write_bytes(archive.read(member))
+                        config.rtunnel_bin.chmod(0o755)
+                        break
+            else:
+                with tarfile.open(tmp.name, "r:gz") as tar:
+                    # Extract the rtunnel binary (should be the only file or named rtunnel*)
+                    for member in tar.getmembers():
+                        if member.isfile() and "rtunnel" in member.name:
+                            # Extract to a temp location first
+                            extracted = tar.extractfile(member)
+                            if extracted:
+                                config.rtunnel_bin.write_bytes(extracted.read())
+                                config.rtunnel_bin.chmod(0o755)
+                                break
             # Clean up temp file
             Path(tmp.name).unlink(missing_ok=True)
 
-        if not config.rtunnel_bin.exists():
-            raise TunnelError("rtunnel binary not found in archive")
+        if not _is_rtunnel_binary_usable(config.rtunnel_bin):
+            raise TunnelError("rtunnel binary missing or unusable after download")
 
         return config.rtunnel_bin
     except Exception as e:

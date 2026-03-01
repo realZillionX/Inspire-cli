@@ -15,6 +15,7 @@ from inspire.config.models import (
     Config,
     ConfigError,
 )
+from inspire.config.rtunnel_defaults import default_rtunnel_download_url
 from inspire.config.schema import CONFIG_OPTIONS
 from inspire.config.toml import (
     _find_project_config,
@@ -149,10 +150,7 @@ def _default_config_values() -> dict[str, Any]:
         "sshd_deb_dir": None,
         "dropbear_deb_dir": None,
         "setup_script": None,
-        "rtunnel_download_url": (
-            "https://github.com/Sarfflow/rtunnel/releases/download/nightly/"
-            "rtunnel-linux-amd64.tar.gz"
-        ),
+        "rtunnel_download_url": default_rtunnel_download_url(),
         "apt_mirror_url": None,
         "tunnel_retries": 3,
         "tunnel_retry_pause": 2.0,

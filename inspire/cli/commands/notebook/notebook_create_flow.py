@@ -198,6 +198,7 @@ def _match_compute_group_by_gpu_type(
     compute_groups: list[dict],
     gpu_pattern: str,
 ) -> tuple[dict | None, str]:
+    # Preferred path: match by explicit gpu_type_stats metadata.
     for group in compute_groups:
         gpu_stats_list = group.get("gpu_type_stats", [])
         for gpu_stats in gpu_stats_list:
@@ -205,6 +206,18 @@ def _match_compute_group_by_gpu_type(
             gpu_type_display = gpu_info.get("gpu_type_display", "")
             if match_gpu_type(gpu_pattern, gpu_type_display):
                 return group, gpu_info.get("gpu_type", "")
+
+    # Fallback path: some workspaces return empty gpu_type_stats for all groups.
+    # In that case, try matching by compute-group name (e.g. "H200-2号机房").
+    for group in compute_groups:
+        name = str(group.get("name", "") or "")
+        if not name:
+            continue
+        if gpu_pattern == "GPU":
+            # Generic GPU request: choose the first available group.
+            return group, ""
+        if match_gpu_type(gpu_pattern, name):
+            return group, ""
     return None, ""
 
 

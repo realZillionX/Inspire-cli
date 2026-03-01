@@ -1127,8 +1127,9 @@ def _send_setup_command_via_terminal_ws(
             lab_frame,
             ws_url=ws_url,
             command=batch_cmd,
-            timeout_ms=120000,
-            completion_marker=SETUP_DONE_MARKER,
+            # Dispatch-only mode: once command is accepted by terminal websocket,
+            # later readiness checks (proxy + SSH preflight) remain authoritative.
+            timeout_ms=15000,
         )
     finally:
         _delete_terminal_via_api(context, lab_url=lab_frame.url, term_name=term_name)
@@ -1677,7 +1678,7 @@ def _ensure_proxy_readiness_with_fallback(
     import sys as _sys
 
     diagnostics: list[str] = []
-    primary_verify_timeout_s = max(12, min(timeout, 35))
+    primary_verify_timeout_s = max(20, min(timeout, 60))
 
     derived_vscode_url = _derive_vscode_proxy_url(proxy_url)
     if derived_vscode_url and derived_vscode_url != proxy_url:
@@ -1805,14 +1806,49 @@ def _send_rtunnel_setup_script(
     try:
         result, browser_term_name = _open_or_create_terminal(context, page, lab_frame)
         if not result:
+            if _send_setup_command_via_terminal_ws(
+                context=context,
+                lab_frame=lab_frame,
+                batch_cmd=batch_cmd,
+            ):
+                _sys.stderr.write("  Recovered by dispatching setup script via terminal WebSocket.\n")
+                _sys.stderr.flush()
+                timer.mark("open_terminal")
+                timer.mark("focus_xterm")
+                timer.mark("build_and_send_cmd")
+                return True
             raise ValueError("Failed to open Jupyter terminal")
         timer.mark("open_terminal")
 
         if not _focus_terminal_input(lab_frame, page):
             page.wait_for_timeout(350)
             if not _wait_for_terminal_surface(lab_frame, timeout_ms=2000):
+                if _send_setup_command_via_terminal_ws(
+                    context=context,
+                    lab_frame=lab_frame,
+                    batch_cmd=batch_cmd,
+                ):
+                    _sys.stderr.write(
+                        "  xterm surface absent; dispatched setup via terminal WebSocket.\n"
+                    )
+                    _sys.stderr.flush()
+                    timer.mark("focus_xterm")
+                    timer.mark("build_and_send_cmd")
+                    return True
                 raise ValueError("Failed to focus Jupyter terminal: xterm surface not ready")
             if not _focus_terminal_input(lab_frame, page):
+                if _send_setup_command_via_terminal_ws(
+                    context=context,
+                    lab_frame=lab_frame,
+                    batch_cmd=batch_cmd,
+                ):
+                    _sys.stderr.write(
+                        "  xterm focus failed; dispatched setup via terminal WebSocket.\n"
+                    )
+                    _sys.stderr.flush()
+                    timer.mark("focus_xterm")
+                    timer.mark("build_and_send_cmd")
+                    return True
                 raise ValueError("Failed to focus Jupyter terminal input")
         timer.mark("focus_xterm")
 
