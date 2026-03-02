@@ -60,7 +60,9 @@ def test_ensure_rtunnel_binary_redownloads_when_existing_binary_is_unusable(
         "_is_rtunnel_binary_usable",
         lambda path: path.exists() and path.read_bytes() == b"new",
     )
-    monkeypatch.setattr(rtunnel_module, "_get_rtunnel_download_url", lambda: "https://example/rt.tgz")
+    monkeypatch.setattr(
+        rtunnel_module, "_get_rtunnel_download_url", lambda: "https://example/rt.tgz"
+    )
     monkeypatch.setattr(
         urllib.request,
         "urlretrieve",

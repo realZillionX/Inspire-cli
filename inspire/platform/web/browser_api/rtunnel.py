@@ -1811,7 +1811,9 @@ def _send_rtunnel_setup_script(
                 lab_frame=lab_frame,
                 batch_cmd=batch_cmd,
             ):
-                _sys.stderr.write("  Recovered by dispatching setup script via terminal WebSocket.\n")
+                _sys.stderr.write(
+                    "  Recovered by dispatching setup script via terminal WebSocket.\n"
+                )
                 _sys.stderr.flush()
                 timer.mark("open_terminal")
                 timer.mark("focus_xterm")
