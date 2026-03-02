@@ -14,6 +14,7 @@
 - `inspire notebook ssh` now resolves numeric notebook list IDs (e.g., `189181`) to canonical notebook IDs before SSH setup.
 - SSH preflight failure hints now include explicit diagnostics when notebook runtime reports `start_config.allow_ssh=false`.
 - `inspire image list --source all` now tolerates per-source failures, returns partial results with warnings, and still fails only when all sources fail.
+- `inspire hpc create` now retries with backend-compatible payload fallbacks when clusters reject `task_priority`/`priority` fields or require string-typed `cpus_per_task` and `memory_per_cpu`.
 
 ## v0.2.4 (2025-01-01)
 

@@ -7,6 +7,19 @@ from typing import Any, Dict
 from inspire.platform.openapi.errors import InspireAPIError, _translate_api_error
 
 
+def _is_unknown_field_error(message: str, field_name: str) -> bool:
+    """Return True when backend reports an unknown protobuf field."""
+    lower = (message or "").lower()
+    return "unknown field" in lower and f'"{field_name.lower()}"' in lower
+
+
+def _is_string_field_type_error(message: str, field_name: str) -> bool:
+    """Return True when backend reports a string-typed field mismatch."""
+    lower = (message or "").lower()
+    compact = lower.replace("_", "").replace(" ", "")
+    return "invalidvalueforstringfield" in compact and field_name.lower() in compact
+
+
 def create_hpc_job(
     api,  # noqa: ANN001
     *,
@@ -58,6 +71,72 @@ def create_hpc_job(
     result = api._make_request("POST", api.endpoints.HPC_JOB_CREATE, payload)
     if result.get("code") == 0:
         return result
+
+    # Backend schema changed on some clusters: `task_priority` may be rejected.
+    # Retry with `priority`, then without any priority field as final fallback.
+    error_msg = str(result.get("message", ""))
+    if _is_unknown_field_error(error_msg, "task_priority"):
+        payload_retry = dict(payload)
+        task_priority_value = payload_retry.pop("task_priority", None)
+        if task_priority_value is not None:
+            payload_retry["priority"] = task_priority_value
+
+        retry = api._make_request("POST", api.endpoints.HPC_JOB_CREATE, payload_retry)
+        if retry.get("code") == 0:
+            return retry
+
+        retry_msg = str(retry.get("message", ""))
+        if _is_unknown_field_error(retry_msg, "priority"):
+            payload_final = dict(payload_retry)
+            payload_final.pop("priority", None)
+            retry_final = api._make_request("POST", api.endpoints.HPC_JOB_CREATE, payload_final)
+            if retry_final.get("code") == 0:
+                return retry_final
+            result = retry_final
+        else:
+            result = retry
+
+    # Backend schema changed on some clusters: cpusPerTask/memoryPerCpu are
+    # string-typed in proto. Retry with string values.
+    error_msg = str(result.get("message", ""))
+    if _is_string_field_type_error(error_msg, "memoryPerCpu") or _is_string_field_type_error(
+        error_msg, "cpusPerTask"
+    ):
+        payload_retry_types = dict(payload)
+        payload_retry_types["cpus_per_task"] = str(payload_retry_types["cpus_per_task"])
+        payload_retry_types["memory_per_cpu"] = str(payload_retry_types["memory_per_cpu"])
+
+        retry_types = api._make_request("POST", api.endpoints.HPC_JOB_CREATE, payload_retry_types)
+        if retry_types.get("code") == 0:
+            return retry_types
+
+        retry_types_msg = str(retry_types.get("message", ""))
+        if _is_unknown_field_error(retry_types_msg, "task_priority"):
+            payload_retry_types2 = dict(payload_retry_types)
+            task_priority_value = payload_retry_types2.pop("task_priority", None)
+            if task_priority_value is not None:
+                payload_retry_types2["priority"] = task_priority_value
+
+            retry_types2 = api._make_request(
+                "POST", api.endpoints.HPC_JOB_CREATE, payload_retry_types2
+            )
+            if retry_types2.get("code") == 0:
+                return retry_types2
+
+            retry_types2_msg = str(retry_types2.get("message", ""))
+            if _is_unknown_field_error(retry_types2_msg, "priority"):
+                payload_retry_types3 = dict(payload_retry_types2)
+                payload_retry_types3.pop("priority", None)
+                retry_types3 = api._make_request(
+                    "POST", api.endpoints.HPC_JOB_CREATE, payload_retry_types3
+                )
+                if retry_types3.get("code") == 0:
+                    return retry_types3
+                result = retry_types3
+            else:
+                result = retry_types2
+        else:
+            result = retry_types
 
     error_code = result.get("code")
     error_msg = result.get("message", "Unknown error")
