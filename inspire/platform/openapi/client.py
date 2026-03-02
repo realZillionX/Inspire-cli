@@ -27,6 +27,9 @@ from inspire.platform.openapi.auth import authenticate as _authenticate
 from inspire.platform.openapi.auth import check_authentication as _check_authentication
 from inspire.platform.openapi.http import make_request as _make_request
 from inspire.platform.openapi.http import make_request_with_retry as _make_request_with_retry
+from inspire.platform.openapi.hpc_jobs import create_hpc_job as _create_hpc_job
+from inspire.platform.openapi.hpc_jobs import get_hpc_job_detail as _get_hpc_job_detail
+from inspire.platform.openapi.hpc_jobs import stop_hpc_job as _stop_hpc_job
 from inspire.platform.openapi.jobs import create_training_job_smart as _create_training_job_smart
 from inspire.platform.openapi.jobs import get_job_detail as _get_job_detail
 from inspire.platform.openapi.jobs import stop_training_job as _stop_training_job
@@ -198,6 +201,48 @@ class InspireAPI:
 
     def stop_training_job(self, job_id: str) -> bool:
         return _stop_training_job(self, job_id)
+
+    def create_hpc_job(
+        self,
+        *,
+        name: str,
+        logic_compute_group_id: str,
+        project_id: str,
+        workspace_id: str,
+        image: str,
+        image_type: str,
+        entrypoint: str,
+        spec_id: str,
+        instance_count: int = 1,
+        task_priority: int = 6,
+        number_of_tasks: int = 1,
+        cpus_per_task: int = 1,
+        memory_per_cpu: int = 4,
+        enable_hyper_threading: bool = False,
+    ) -> Dict[str, Any]:
+        return _create_hpc_job(
+            self,
+            name=name,
+            logic_compute_group_id=logic_compute_group_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            image=image,
+            image_type=image_type,
+            entrypoint=entrypoint,
+            spec_id=spec_id,
+            instance_count=instance_count,
+            task_priority=task_priority,
+            number_of_tasks=number_of_tasks,
+            cpus_per_task=cpus_per_task,
+            memory_per_cpu=memory_per_cpu,
+            enable_hyper_threading=enable_hyper_threading,
+        )
+
+    def get_hpc_job_detail(self, job_id: str) -> Dict[str, Any]:
+        return _get_hpc_job_detail(self, job_id)
+
+    def stop_hpc_job(self, job_id: str) -> bool:
+        return _stop_hpc_job(self, job_id)
 
     def list_cluster_nodes(
         self, page_num: int = 1, page_size: int = 10, resource_pool: Optional[str] = None

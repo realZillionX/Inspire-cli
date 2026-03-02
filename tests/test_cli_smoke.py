@@ -12,6 +12,7 @@ def test_cli_help_includes_top_level_groups() -> None:
     assert "image" in result.output
     assert "resources" in result.output
     assert "tunnel" in result.output
+    assert "hpc" in result.output
 
 
 def test_job_help_includes_key_subcommands() -> None:
@@ -28,7 +29,17 @@ def test_notebook_help_includes_key_subcommands() -> None:
     assert result.exit_code == 0
     assert "list" in result.output
     assert "status" in result.output
-    assert "top" in result.output
+    assert "ssh" in result.output
+
+
+def test_hpc_help_includes_key_subcommands() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["hpc", "--help"])
+    assert result.exit_code == 0
+    assert "list" in result.output
+    assert "create" in result.output
+    assert "status" in result.output
+    assert "stop" in result.output
 
 
 def test_resources_help_includes_key_subcommands() -> None:
