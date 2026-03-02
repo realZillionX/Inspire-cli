@@ -396,6 +396,67 @@ def _resolve_notebook_id(
     if _looks_like_notebook_id(identifier):
         return identifier, None
 
+    if identifier.isdigit():
+        numeric_matches: list[tuple[str, dict]] = []
+        numeric_workspace_ids = _collect_workspace_ids_for_lookup(session, config)
+        numeric_user_ids = _try_get_current_user_ids(session, base_url=base_url)
+
+        for ws_id in numeric_workspace_ids:
+            try:
+                items = _list_notebooks_for_workspace(
+                    session,
+                    base_url=base_url,
+                    workspace_id=ws_id,
+                    user_ids=numeric_user_ids,
+                    page_size=100,
+                )
+            except Exception:
+                continue
+
+            for item in items:
+                list_id = str(item.get("id") or "").strip()
+                if list_id == identifier:
+                    numeric_matches.append((ws_id, item))
+
+        numeric_matches.sort(key=lambda m: str(m[1].get("created_at") or ""), reverse=True)
+
+        if len(numeric_matches) == 1:
+            ws_id, item = numeric_matches[0]
+            notebook_id = _notebook_id_from_item(item)
+            if notebook_id:
+                return notebook_id, ws_id
+        elif len(numeric_matches) > 1:
+            if json_output:
+                ids = [(_notebook_id_from_item(item) or "?") for _, item in numeric_matches]
+                _handle_error(
+                    ctx,
+                    "ValidationError",
+                    f"Multiple notebooks match numeric id '{identifier}': {', '.join(ids)}",
+                    EXIT_VALIDATION_ERROR,
+                    hint="Use a notebook UUID/notebook-id instead.",
+                )
+
+            click.echo(f"Multiple notebooks match numeric id '{identifier}':")
+            for idx, (ws_id, item) in enumerate(numeric_matches, start=1):
+                notebook_id = _notebook_id_from_item(item) or "N/A"
+                status = str(item.get("status") or "Unknown")
+                resource = _format_notebook_resource(item)
+                created_at = str(item.get("created_at") or "")
+                click.echo(
+                    f"  [{idx}] {status:<12} {resource:<12} {notebook_id}  {created_at}  ws={ws_id}"
+                )
+
+            choice = click.prompt(
+                "Select notebook",
+                type=click.IntRange(1, len(numeric_matches)),
+                default=1,
+                show_default=True,
+            )
+            ws_id, item = numeric_matches[choice - 1]
+            notebook_id = _notebook_id_from_item(item)
+            if notebook_id:
+                return notebook_id, ws_id
+
     if is_partial_id(identifier, prefix="notebook-"):
         partial = normalize_partial(identifier, prefix="notebook-")
         resolved_partial = _resolve_partial_notebook_id(
@@ -1624,6 +1685,18 @@ def run_notebook_ssh(
         retry_pause=1.5,
     ):
         proxy_status = _describe_proxy_http_status(proxy_url)
+        allow_ssh = None
+        start_config = notebook_detail.get("start_config")
+        if isinstance(start_config, dict):
+            allow_ssh = start_config.get("allow_ssh")
+
+        ssh_capability_hint = ""
+        if allow_ssh is False:
+            ssh_capability_hint = (
+                " Notebook runtime reports start_config.allow_ssh=false, which usually means "
+                "the image does not include SSH tooling (sshd/dropbear/rtunnel)."
+            )
+
         _handle_error(
             ctx,
             "APIError",
@@ -1634,6 +1707,7 @@ def run_notebook_ssh(
                 "or run 'inspire tunnel test -b "
                 f"{profile_name}' to inspect connectivity. "
                 f"Proxy readiness report: {proxy_status} ({redact_proxy_url(proxy_url)})."
+                f"{ssh_capability_hint}"
             ),
         )
         return

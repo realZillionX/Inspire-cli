@@ -6,6 +6,7 @@ from __future__ import annotations
 CATEGORY_ORDER = [
     "Authentication",
     "API",
+    "Proxy",
     "Paths",
     "Git Platform",
     "Gitea",

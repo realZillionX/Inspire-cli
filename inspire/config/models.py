@@ -83,6 +83,12 @@ class Config:
     auth_endpoint: Optional[str] = None
     docker_registry: Optional[str] = None
 
+    # Proxy settings ([proxy] in TOML)
+    requests_http_proxy: Optional[str] = None
+    requests_https_proxy: Optional[str] = None
+    playwright_proxy: Optional[str] = None
+    rtunnel_proxy: Optional[str] = None
+
     # Job settings
     job_priority: int = 6
     job_image: Optional[str] = None

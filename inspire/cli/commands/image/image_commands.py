@@ -143,12 +143,22 @@ def list_images_cmd(
     )
 
     results: list[dict] = []
+    warnings: list[str] = []
 
     try:
         if source == "all":
             for src_key in ("official", "public", "private"):
-                items = browser_api_module.list_images_by_source(source=src_key, session=session)
+                try:
+                    items = browser_api_module.list_images_by_source(
+                        source=src_key, session=session
+                    )
+                except Exception as e:
+                    warnings.append(f"{src_key}: {e}")
+                    continue
                 results.extend(_image_to_dict(img) for img in items)
+
+            if not results and warnings:
+                raise ValueError("; ".join(warnings))
         else:
             items = browser_api_module.list_images_by_source(source=source, session=session)
             results.extend(_image_to_dict(img) for img in items)
@@ -157,8 +167,14 @@ def list_images_cmd(
         return
 
     if json_output:
-        click.echo(json_formatter.format_json({"images": results, "total": len(results)}))
+        payload = {"images": results, "total": len(results)}
+        if warnings:
+            payload["warnings"] = warnings
+        click.echo(json_formatter.format_json(payload))
         return
+
+    for warning in warnings:
+        click.echo(f"Warning: failed to list images from {warning}", err=True)
 
     click.echo(human_formatter.format_image_list(results))
 

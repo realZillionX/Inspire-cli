@@ -107,6 +107,45 @@ API_OPTIONS: list[ConfigOption] = [
     ),
 ]
 
+PROXY_OPTIONS: list[ConfigOption] = [
+    ConfigOption(
+        env_var="INSPIRE_REQUESTS_HTTP_PROXY",
+        toml_key="proxy.requests_http",
+        field_name="requests_http_proxy",
+        description="HTTP proxy URL for requests/curl style traffic",
+        default=None,
+        category="Proxy",
+        scope="global",
+    ),
+    ConfigOption(
+        env_var="INSPIRE_REQUESTS_HTTPS_PROXY",
+        toml_key="proxy.requests_https",
+        field_name="requests_https_proxy",
+        description="HTTPS proxy URL for requests/curl style traffic",
+        default=None,
+        category="Proxy",
+        scope="global",
+    ),
+    ConfigOption(
+        env_var="INSPIRE_PLAYWRIGHT_PROXY",
+        toml_key="proxy.playwright",
+        field_name="playwright_proxy",
+        description="Proxy URL for Playwright browser automation",
+        default=None,
+        category="Proxy",
+        scope="global",
+    ),
+    ConfigOption(
+        env_var="INSPIRE_RTUNNEL_PROXY",
+        toml_key="proxy.rtunnel",
+        field_name="rtunnel_proxy",
+        description="Proxy URL for rtunnel/SSH ProxyCommand transport",
+        default=None,
+        category="Proxy",
+        scope="global",
+    ),
+]
+
 AUTH_OPTIONS: list[ConfigOption] = [
     ConfigOption(
         env_var="INSPIRE_USERNAME",

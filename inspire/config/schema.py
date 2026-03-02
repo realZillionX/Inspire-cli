@@ -17,7 +17,7 @@ from inspire.config.schema_models import (  # noqa: F401
     _parse_list,
     parse_value,
 )
-from inspire.config.options.api import API_OPTIONS, AUTH_OPTIONS
+from inspire.config.options.api import API_OPTIONS, AUTH_OPTIONS, PROXY_OPTIONS
 from inspire.config.options.forge import GITEA_OPTIONS, GITHUB_OPTIONS, GIT_PLATFORM_OPTIONS
 from inspire.config.options.infra import SSH_OPTIONS, TUNNEL_OPTIONS, BRIDGE_OPTIONS, PATHS_OPTIONS
 from inspire.config.options.project import (
@@ -31,6 +31,7 @@ from inspire.config.options.project import (
 CONFIG_OPTIONS: list[ConfigOption] = [
     *AUTH_OPTIONS,
     *API_OPTIONS,
+    *PROXY_OPTIONS,
     *PATHS_OPTIONS,
     *GIT_PLATFORM_OPTIONS,
     *GITEA_OPTIONS,

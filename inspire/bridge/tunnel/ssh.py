@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlsplit
+
+from inspire.platform.web.session.proxy import get_rtunnel_proxy_override
 
 from .config import load_tunnel_config
 from .models import BridgeProfile, TunnelConfig, TunnelError
@@ -41,35 +41,8 @@ def _get_proxy_command(bridge: BridgeProfile, rtunnel_bin: Path, quiet: bool = F
     else:
         ws_url = proxy_url
 
-    def _looks_like_qizhi_base(base_url: str) -> bool:
-        try:
-            host = urlsplit(base_url).hostname or ""
-        except Exception:
-            host = ""
-        host = host.lower()
-        return host == "qz.sii.edu.cn" or host.endswith(".sii.edu.cn")
-
-    def _rtunnel_proxy_override() -> str | None:
-        explicit = (
-            os.environ.get("INSPIRE_RTUNNEL_PROXY")
-            or os.environ.get("inspire_rtunnel_proxy")
-            or os.environ.get("INSPIRE_PLAYWRIGHT_PROXY")
-            or os.environ.get("inspire_playwright_proxy")
-            or os.environ.get("PLAYWRIGHT_PROXY")
-        )
-        if explicit:
-            return explicit
-
-        base_url = os.environ.get("INSPIRE_BASE_URL", "")
-        http_proxy = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY") or ""
-        https_proxy = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY") or ""
-        chosen_http_proxy = https_proxy or http_proxy
-        if _looks_like_qizhi_base(base_url) and chosen_http_proxy.startswith("http://127.0.0.1:8888"):
-            return "socks5://127.0.0.1:1080"
-        return None
-
     def _prepend_proxy_env(command: str) -> str:
-        proxy_value = _rtunnel_proxy_override()
+        proxy_value = get_rtunnel_proxy_override()
         if not proxy_value:
             return command
         env_prefix = " ".join(
@@ -85,7 +58,9 @@ def _get_proxy_command(bridge: BridgeProfile, rtunnel_bin: Path, quiet: bool = F
     # ProxyCommand is executed by a shell on the client; quote the URL because it
     # can contain characters like '?' (e.g. token query params) that some shells
     # treat as glob patterns.
-    base_cmd = f"{shlex.quote(str(rtunnel_bin))} {shlex.quote(ws_url)} {shlex.quote('stdio://%h:%p')}"
+    base_cmd = (
+        f"{shlex.quote(str(rtunnel_bin))} {shlex.quote(ws_url)} {shlex.quote('stdio://%h:%p')}"
+    )
     base_cmd = _prepend_proxy_env(base_cmd)
     if quiet:
         # Wrap in sh -c to redirect stderr, suppressing rtunnel's verbose output

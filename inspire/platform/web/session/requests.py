@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import requests
 
 from .models import WebSession
+from .proxy import resolve_requests_proxy_config
 
 
 def _cookie_jar_from_session(
@@ -51,4 +52,10 @@ def build_requests_session(session: WebSession, base_url: str) -> requests.Sessi
             ),
         }
     )
+    proxies, source = resolve_requests_proxy_config()
+    if source in {"explicit_env", "toml"} and proxies:
+        http.proxies.update(proxies)
+        # For explicit Inspire proxy settings, avoid unexpected system-level
+        # proxy overrides/no_proxy interactions.
+        http.trust_env = False
     return http

@@ -1802,7 +1802,8 @@ def test_run_notebook_ssh_passes_resolved_runtime_to_setup(
         browser_api_module,
         "wait_for_notebook_running",
         lambda notebook_id, session=None: {
-            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}}
+            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}},
+            "start_config": {"allow_ssh": False},
         },
     )
     monkeypatch.setattr(
@@ -1911,7 +1912,8 @@ def test_run_notebook_ssh_refreshes_saved_profile_on_notebook_mismatch(
         browser_api_module,
         "wait_for_notebook_running",
         lambda notebook_id, session=None: {
-            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}}
+            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}},
+            "start_config": {"allow_ssh": False},
         },
     )
     monkeypatch.setattr(
@@ -1975,6 +1977,51 @@ def test_run_notebook_ssh_refreshes_saved_profile_on_notebook_mismatch(
     assert getattr(saved_profile, "notebook_id", None) == "notebook-12345678"
 
 
+def test_resolve_notebook_id_accepts_numeric_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeSession:
+        workspace_id = "ws-test"
+        storage_state = {}
+
+    cfg = make_test_config(tmp_path)
+    notebook_item = {
+        "id": 189181,
+        "notebook_id": "notebook-12345678-90ab-cdef-1234-567890abcdef",
+        "name": "alpha-notebook",
+        "status": "RUNNING",
+        "created_at": "2026-03-02T12:00:00Z",
+    }
+
+    monkeypatch.setattr(
+        notebook_cmd_module,
+        "_collect_workspace_ids_for_lookup",
+        lambda session, config: ["ws-test"],
+    )
+    monkeypatch.setattr(
+        notebook_cmd_module,
+        "_try_get_current_user_ids",
+        lambda session, base_url: ["user-1"],
+    )
+    monkeypatch.setattr(
+        notebook_cmd_module,
+        "_list_notebooks_for_workspace",
+        lambda *args, **kwargs: [notebook_item],
+    )
+
+    notebook_id, workspace_id = notebook_cmd_module._resolve_notebook_id(
+        Context(),
+        session=FakeSession(),
+        config=cfg,
+        base_url="https://qz.sii.edu.cn",
+        identifier="189181",
+        json_output=True,
+    )
+
+    assert notebook_id == "notebook-12345678-90ab-cdef-1234-567890abcdef"
+    assert workspace_id == "ws-test"
+
+
 def test_run_notebook_ssh_interactive_reconnects_after_drop(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2018,7 +2065,8 @@ def test_run_notebook_ssh_interactive_reconnects_after_drop(
         browser_api_module,
         "wait_for_notebook_running",
         lambda notebook_id, session=None: {
-            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}}
+            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}},
+            "start_config": {"allow_ssh": False},
         },
     )
     monkeypatch.setattr(
@@ -2130,7 +2178,8 @@ def test_run_notebook_ssh_reports_when_tunnel_not_ready(
         browser_api_module,
         "wait_for_notebook_running",
         lambda notebook_id, session=None: {
-            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}}
+            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}},
+            "start_config": {"allow_ssh": False},
         },
     )
     monkeypatch.setattr(
@@ -2198,3 +2247,4 @@ def test_run_notebook_ssh_reports_when_tunnel_not_ready(
     assert captured["type"] == "APIError"
     assert "SSH preflight failed" in captured["message"]
     assert "Proxy readiness report:" in captured["hint"]
+    assert "allow_ssh=false" in captured["hint"]

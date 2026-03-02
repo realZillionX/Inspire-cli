@@ -31,6 +31,12 @@ timeout = 30
 max_retries = 3
 retry_delay = 1.0
 
+[proxy]
+# requests_http = "http://127.0.0.1:8888"
+# requests_https = "http://127.0.0.1:8888"
+# playwright = "socks5://127.0.0.1:1080"
+# rtunnel = "socks5://127.0.0.1:1080"
+
 [paths]
 target_dir = "/shared/EBM_dev"
 log_pattern = "training_master_*.log"

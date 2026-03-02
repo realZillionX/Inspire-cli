@@ -146,6 +146,13 @@ password = "your_password"
 [api]
 base_url = "https://your-inspire-platform.com"
 
+[proxy]
+# Optional split-proxy routing:
+# requests_http = "http://127.0.0.1:8888"
+# requests_https = "http://127.0.0.1:8888"
+# playwright = "socks5://127.0.0.1:1080"
+# rtunnel = "socks5://127.0.0.1:1080"
+
 [bridge]
 # Timeout in seconds for `inspire bridge exec`
 action_timeout = 600
@@ -187,6 +194,10 @@ inspire init --json --template --project --force
 | `INSPIRE_USERNAME` | Platform username |
 | `INSPIRE_PASSWORD` | Platform password |
 | `INSPIRE_BASE_URL` | API base URL |
+| `INSPIRE_REQUESTS_HTTP_PROXY` | HTTP proxy for requests/curl traffic |
+| `INSPIRE_REQUESTS_HTTPS_PROXY` | HTTPS proxy for requests/curl traffic |
+| `INSPIRE_PLAYWRIGHT_PROXY` | Proxy for Playwright browser automation |
+| `INSPIRE_RTUNNEL_PROXY` | Proxy for rtunnel/SSH ProxyCommand traffic |
 | `INSPIRE_TARGET_DIR` | Shared filesystem path |
 | `INSPIRE_WORKSPACE_ID` | Default workspace ID |
 | `INSPIRE_WORKSPACE_CPU_ID` | CPU workspace ID (default workspace) |
@@ -195,3 +206,12 @@ inspire init --json --template --project --force
 | `INSPIRE_PROJECT_ID` | Default project ID |
 | `INSP_IMAGE` | Default Docker image |
 | `INSP_PRIORITY` | Job priority (1-10) |
+
+Proxy precedence:
+1. Explicit env vars (`INSPIRE_*_PROXY`).
+2. Layered TOML values under `[proxy]`.
+3. System `http_proxy` / `https_proxy`.
+
+QiZhi split-routing auto-fallback is preserved: when request-side proxy resolves
+to `http://127.0.0.1:8888` under `.sii.edu.cn`, Playwright and rtunnel
+automatically use `socks5://127.0.0.1:1080`.

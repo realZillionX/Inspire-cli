@@ -9,6 +9,7 @@ from inspire.platform.web import session as ws
 from inspire.platform.web.session import auth as ws_auth
 from inspire.platform.web.session import browser_client as ws_browser_client
 from inspire.platform.web.session import WebSession
+from inspire.platform.web.session import requests as ws_requests_module
 
 
 class DummyResponse:
@@ -75,6 +76,33 @@ class DummyRequestContext:
 class DummyBrowserContext:
     def __init__(self) -> None:
         self.request = DummyRequestContext()
+
+
+def test_build_requests_session_applies_toml_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = WebSession(
+        storage_state={"cookies": [{"name": "session", "value": "abc"}]},
+        cookies={"session": "abc"},
+        workspace_id="ws-test",
+        created_at=0,
+    )
+    monkeypatch.setattr(
+        ws_requests_module,
+        "resolve_requests_proxy_config",
+        lambda: (
+            {
+                "http": "http://127.0.0.1:8888",
+                "https": "http://127.0.0.1:8888",
+            },
+            "toml",
+        ),
+    )
+
+    http = ws_requests_module.build_requests_session(session, "https://qz.sii.edu.cn/api/v1/test")
+
+    assert http.proxies["http"] == "http://127.0.0.1:8888"
+    assert http.proxies["https"] == "http://127.0.0.1:8888"
+    assert http.trust_env is False
+    http.close()
 
 
 def test_request_json_falls_back_to_browser_client(monkeypatch: pytest.MonkeyPatch):

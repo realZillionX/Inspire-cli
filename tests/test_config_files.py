@@ -67,6 +67,9 @@ class TestConfigSchema:
         opt = get_option_by_toml("auth.username")
         assert opt is not None
         assert opt.env_var == "INSPIRE_USERNAME"
+        proxy_opt = get_option_by_toml("proxy.requests_http")
+        assert proxy_opt is not None
+        assert proxy_opt.env_var == "INSPIRE_REQUESTS_HTTP_PROXY"
 
     def test_get_option_not_found(self) -> None:
         """Test getting non-existent option."""
@@ -79,6 +82,7 @@ class TestConfigSchema:
         assert len(categories) > 0
         assert "Authentication" in categories
         assert "API" in categories
+        assert "Proxy" in categories
 
     def test_get_options_by_category(self) -> None:
         """Test getting options by category."""
@@ -104,6 +108,8 @@ class TestConfigSchema:
         # API settings should be global
         assert "INSPIRE_BASE_URL" in global_env_vars
         assert "INSPIRE_TIMEOUT" in global_env_vars
+        assert "INSPIRE_REQUESTS_HTTP_PROXY" in global_env_vars
+        assert "INSPIRE_PLAYWRIGHT_PROXY" in global_env_vars
 
         # Gitea server and token should be global
         assert "INSP_GITEA_SERVER" in global_env_vars
@@ -200,6 +206,8 @@ timeout = 60
         """Test mapping TOML keys to Config field names."""
         assert Config._toml_key_to_field("auth.username") == "username"
         assert Config._toml_key_to_field("api.timeout") == "timeout"
+        assert Config._toml_key_to_field("proxy.requests_http") == "requests_http_proxy"
+        assert Config._toml_key_to_field("proxy.playwright") == "playwright_proxy"
         assert Config._toml_key_to_field("paths.target_dir") == "target_dir"
         assert Config._toml_key_to_field("workspaces.cpu") == "workspace_cpu_id"
         assert Config._toml_key_to_field("workspaces.gpu") == "workspace_gpu_id"
@@ -223,6 +231,10 @@ class TestLayeredConfig:
             "INSPIRE_PASSWORD",
             "INSPIRE_BASE_URL",
             "INSPIRE_TIMEOUT",
+            "INSPIRE_REQUESTS_HTTP_PROXY",
+            "INSPIRE_REQUESTS_HTTPS_PROXY",
+            "INSPIRE_PLAYWRIGHT_PROXY",
+            "INSPIRE_RTUNNEL_PROXY",
             "INSPIRE_TARGET_DIR",
             "INSP_GITEA_SERVER",
         ]
@@ -377,6 +389,41 @@ timeout = 45
         assert cfg.timeout == 90
         assert sources["username"] == SOURCE_ENV
         assert sources["timeout"] == SOURCE_ENV
+
+    def test_from_files_and_env_proxy_layering(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        """Proxy settings should load from [proxy] and allow env override."""
+        global_dir = tmp_path / "global"
+        global_dir.mkdir()
+        global_config = global_dir / "config.toml"
+        global_config.write_text(
+            """
+[auth]
+username = "globaluser"
+
+[proxy]
+requests_http = "http://127.0.0.1:8888"
+requests_https = "http://127.0.0.1:8888"
+playwright = "socks5://127.0.0.1:1080"
+rtunnel = "socks5://127.0.0.1:1080"
+"""
+        )
+
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", global_config)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("INSPIRE_REQUESTS_HTTP_PROXY", "http://127.0.0.1:7897")
+
+        cfg, sources = Config.from_files_and_env(require_credentials=False)
+
+        assert cfg.requests_http_proxy == "http://127.0.0.1:7897"
+        assert cfg.requests_https_proxy == "http://127.0.0.1:8888"
+        assert cfg.playwright_proxy == "socks5://127.0.0.1:1080"
+        assert cfg.rtunnel_proxy == "socks5://127.0.0.1:1080"
+        assert sources["requests_http_proxy"] == SOURCE_ENV
+        assert sources["requests_https_proxy"] == SOURCE_GLOBAL
+        assert sources["playwright_proxy"] == SOURCE_GLOBAL
+        assert sources["rtunnel_proxy"] == SOURCE_GLOBAL
 
     def test_from_files_and_env_remote_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
@@ -1653,6 +1700,10 @@ class TestPreferSource:
             "INSPIRE_PASSWORD",
             "INSPIRE_BASE_URL",
             "INSPIRE_TIMEOUT",
+            "INSPIRE_REQUESTS_HTTP_PROXY",
+            "INSPIRE_REQUESTS_HTTPS_PROXY",
+            "INSPIRE_PLAYWRIGHT_PROXY",
+            "INSPIRE_RTUNNEL_PROXY",
             "INSPIRE_TARGET_DIR",
             "INSP_GITEA_SERVER",
         ]

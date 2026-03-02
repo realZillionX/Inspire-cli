@@ -102,6 +102,10 @@ def config_from_env(*, require_target_dir: bool = False) -> Config:
         default_remote=os.getenv("INSPIRE_DEFAULT_REMOTE", "origin"),
         bridge_action_timeout=bridge_action_timeout,
         bridge_action_denylist=_parse_denylist(os.getenv("INSPIRE_BRIDGE_DENYLIST")),
+        requests_http_proxy=os.getenv("INSPIRE_REQUESTS_HTTP_PROXY"),
+        requests_https_proxy=os.getenv("INSPIRE_REQUESTS_HTTPS_PROXY"),
+        playwright_proxy=os.getenv("INSPIRE_PLAYWRIGHT_PROXY"),
+        rtunnel_proxy=os.getenv("INSPIRE_RTUNNEL_PROXY"),
     )
 
 
@@ -173,4 +177,8 @@ def config_from_env_for_sync() -> Config:
         remote_timeout=_parse_remote_timeout(os.getenv("INSP_REMOTE_TIMEOUT", "90")),
         bridge_action_timeout=bridge_action_timeout,
         bridge_action_denylist=_parse_denylist(os.getenv("INSPIRE_BRIDGE_DENYLIST")),
+        requests_http_proxy=os.getenv("INSPIRE_REQUESTS_HTTP_PROXY"),
+        requests_https_proxy=os.getenv("INSPIRE_REQUESTS_HTTPS_PROXY"),
+        playwright_proxy=os.getenv("INSPIRE_PLAYWRIGHT_PROXY"),
+        rtunnel_proxy=os.getenv("INSPIRE_RTUNNEL_PROXY"),
     )

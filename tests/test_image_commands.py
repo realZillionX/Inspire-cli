@@ -403,6 +403,70 @@ def test_image_list_all_sources(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert "private-img" in names
 
 
+def test_image_list_all_sources_partial_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_config_and_session(monkeypatch, tmp_path)
+
+    def fake_list_by_source(source="official", session=None):
+        if source == "public":
+            raise RuntimeError("socket hang up")
+        if source == "official":
+            return [
+                browser_api_module.CustomImageInfo(
+                    image_id="img-off",
+                    url="registry/off",
+                    name="official-img",
+                    framework="TF",
+                    version="1.0",
+                    source="SOURCE_OFFICIAL",
+                    status="READY",
+                    description="",
+                    created_at="",
+                )
+            ]
+        if source == "private":
+            return [
+                browser_api_module.CustomImageInfo(
+                    image_id="img-priv",
+                    url="registry/priv",
+                    name="private-img",
+                    framework="PT",
+                    version="2.0",
+                    source="SOURCE_PRIVATE",
+                    status="READY",
+                    description="",
+                    created_at="",
+                )
+            ]
+        return []
+
+    monkeypatch.setattr(browser_api_module, "list_images_by_source", fake_list_by_source)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["--json", "image", "list", "--source", "all"])
+    assert result.exit_code == 0
+
+    payload = json.loads(result.output)
+    assert payload["data"]["total"] == 2
+    assert len(payload["data"]["warnings"]) == 1
+    assert payload["data"]["warnings"][0].startswith("public:")
+
+
+def test_image_list_all_sources_all_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _patch_config_and_session(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        browser_api_module,
+        "list_images_by_source",
+        lambda source="official", session=None: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["--json", "image", "list", "--source", "all"])
+    assert result.exit_code != 0
+
+
 def test_image_detail_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_config_and_session(monkeypatch, tmp_path)
 
