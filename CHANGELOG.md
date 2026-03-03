@@ -20,6 +20,8 @@
 - `inspire notebook ssh` now resolves numeric notebook list IDs (e.g., `189181`) to canonical notebook IDs before SSH setup.
 - SSH preflight failure hints now include explicit diagnostics when notebook runtime reports `start_config.allow_ssh=false`.
 - `inspire image list --source all` now tolerates per-source failures, returns partial results with warnings, and still fails only when all sources fail.
+- `inspire image list --source private` now matches UI "个人可见镜像" semantics (`visibility=VISIBILITY_PRIVATE` with combined private/public source list), and new `--source my-private` preserves direct `SOURCE_PRIVATE` queries for backward compatibility.
+- `inspire image list --source all` now aggregates `official/public/private/my-private` and deduplicates by `image_id`; partial image-ID resolution for `detail/delete` now scans the same source set to avoid lookup gaps.
 - Web-session request stack now supports `DELETE` in both requests and Playwright fallback clients, fixing `inspire image delete` failures caused by unsupported HTTP methods.
 - `inspire hpc create` now retries with backend-compatible payload fallbacks when clusters reject `task_priority`/`priority` fields or require string-typed `cpus_per_task` and `memory_per_cpu`.
 - CPU notebook compute-group selection now prefers `CPU资源-2` and `HPC-可上网区资源-2` when `gpu_count == 0`, avoiding accidental binding to generic `CPU资源`.
@@ -28,6 +30,7 @@
 ### Docs
 
 - Rewrote `docs/GUIDE.md` into an execution-first flow aligned with real CLI behavior and validated write-path outcomes.
+- Updated image-source documentation to map UI categories (官方／公开可见／个人可见) to CLI `--source` values, with troubleshooting examples for `wanvideo:1.0`.
 
 ### Tests
 

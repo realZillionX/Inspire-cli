@@ -155,8 +155,25 @@ inspire run 'echo train && sleep 300' \
 
 - `inspire image set-default` 必须使用 `--job` 和／或 `--notebook`，不能只传 `<image_id>`。
 - `inspire image delete <image_id>` 已支持真实删除链路。
+- `inspire image list --source private` 对应网页“个人可见镜像”。
+- `inspire image list --source my-private` 对应旧语义 `SOURCE_PRIVATE` 直查。
+- `inspire image list --source all` 聚合 `official/public/private/my-private` 并按 `image_id` 去重。
 - `inspire tunnel remove` 不支持 `--force`。
 - `inspire notebook ssh` 受 `allow_ssh` 约束，先看 `notebook status --json` 的 `start_config.allow_ssh`。
+
+镜像查询速查（UI → CLI）。
+
+- 官方镜像：`inspire image list --source official --json`。
+- 公开可见镜像：`inspire image list --source public --json`。
+- 个人可见镜像：`inspire image list --source private --json`。
+
+`wanvideo:1.0` 排障示例。
+
+```bash
+inspire image list --source private --json | rg -n '"name": "wanvideo:1.0"'
+inspire image list --source my-private --json
+inspire image list --source all --json | rg -n 'wanvideo'
+```
 
 ---
 
@@ -180,4 +197,3 @@ inspire run 'echo train && sleep 300' \
 ## 6. 与 Skill 的关系
 
 `SKILL.md` 是本 GUIDE 的可执行黑盒手册版本。建议优先按 `SKILL.md` 执行，遇到差异以实测结果回写本 GUIDE。
-

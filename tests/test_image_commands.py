@@ -241,6 +241,69 @@ def test_list_images_by_source_public(monkeypatch: pytest.MonkeyPatch):
     assert "SOURCE_PUBLIC" in captured["body"]["filter"]["source_list"]
 
 
+def test_list_images_by_source_private_personal_visible(monkeypatch: pytest.MonkeyPatch):
+    captured: dict[str, Any] = {}
+
+    def fake_request_notebooks_data(
+        session,
+        method: str,
+        endpoint_path: str,
+        *,
+        body: Optional[dict] = None,
+        timeout: int = 30,
+        default_data: Any = None,
+    ) -> Any:
+        captured["body"] = body
+        return {"images": []}
+
+    from inspire.platform.web.browser_api import images as images_module
+
+    monkeypatch.setattr(images_module, "_request_notebooks_data", fake_request_notebooks_data)
+    monkeypatch.setattr(
+        images_module,
+        "_get_session_and_workspace_id",
+        lambda workspace_id, session: (FakeWebSession(), "ws-test"),
+    )
+
+    results = list_images_by_source(source="private")
+    assert results == []
+    assert captured["body"]["filter"]["visibility"] == "VISIBILITY_PRIVATE"
+    assert "SOURCE_PRIVATE" in captured["body"]["filter"]["source_list"]
+    assert "SOURCE_PUBLIC" in captured["body"]["filter"]["source_list"]
+    assert "source" not in captured["body"]["filter"]
+
+
+def test_list_images_by_source_my_private(monkeypatch: pytest.MonkeyPatch):
+    captured: dict[str, Any] = {}
+
+    def fake_request_notebooks_data(
+        session,
+        method: str,
+        endpoint_path: str,
+        *,
+        body: Optional[dict] = None,
+        timeout: int = 30,
+        default_data: Any = None,
+    ) -> Any:
+        captured["body"] = body
+        return {"images": []}
+
+    from inspire.platform.web.browser_api import images as images_module
+
+    monkeypatch.setattr(images_module, "_request_notebooks_data", fake_request_notebooks_data)
+    monkeypatch.setattr(
+        images_module,
+        "_get_session_and_workspace_id",
+        lambda workspace_id, session: (FakeWebSession(), "ws-test"),
+    )
+
+    results = list_images_by_source(source="my-private")
+    assert results == []
+    assert captured["body"]["filter"]["source"] == "SOURCE_PRIVATE"
+    assert captured["body"]["filter"]["source_list"] == []
+    assert "visibility" not in captured["body"]["filter"]
+
+
 # ---------------------------------------------------------------------------
 # CLI smoke tests
 # ---------------------------------------------------------------------------
@@ -331,10 +394,10 @@ def test_image_list_private_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
             browser_api_module.CustomImageInfo(
                 image_id="img-priv-001",
                 url="registry/my-custom:v1",
-                name="my-custom",
+                name="personal-visible-img",
                 framework="pytorch",
                 version="2.1",
-                source="SOURCE_PRIVATE",
+                source="SOURCE_PUBLIC",
                 status="READY",
                 description="Custom image",
                 created_at="2026-01-10",
@@ -348,6 +411,38 @@ def test_image_list_private_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
     payload = json.loads(result.output)
     assert payload["data"]["total"] == 1
+    assert payload["data"]["images"][0]["name"] == "personal-visible-img"
+    assert payload["data"]["images"][0]["source"] == "SOURCE_PUBLIC"
+
+
+def test_image_list_my_private_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _patch_config_and_session(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        browser_api_module,
+        "list_images_by_source",
+        lambda source="official", session=None: [
+            browser_api_module.CustomImageInfo(
+                image_id="img-my-priv-001",
+                url="registry/my-private:v1",
+                name="my-private-img",
+                framework="pytorch",
+                version="2.1",
+                source="SOURCE_PRIVATE",
+                status="READY",
+                description="My private image",
+                created_at="2026-01-10",
+            )
+        ],
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["--json", "image", "list", "--source", "my-private"])
+    assert result.exit_code == 0
+
+    payload = json.loads(result.output)
+    assert payload["data"]["total"] == 1
+    assert payload["data"]["images"][0]["name"] == "my-private-img"
     assert payload["data"]["images"][0]["source"] == "SOURCE_PRIVATE"
 
 
@@ -372,16 +467,55 @@ def test_image_list_all_sources(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
         elif source == "private":
             return [
                 browser_api_module.CustomImageInfo(
-                    image_id="img-priv",
-                    url="registry/priv",
-                    name="private-img",
+                    image_id="img-shared",
+                    url="registry/personal-visible",
+                    name="personal-visible-img",
+                    framework="PT",
+                    version="2.0",
+                    source="SOURCE_PUBLIC",
+                    status="READY",
+                    description="",
+                    created_at="",
+                )
+            ]
+        elif source == "public":
+            return [
+                browser_api_module.CustomImageInfo(
+                    image_id="img-pub",
+                    url="registry/pub",
+                    name="public-img",
+                    framework="PT",
+                    version="1.9",
+                    source="SOURCE_PUBLIC",
+                    status="READY",
+                    description="",
+                    created_at="",
+                )
+            ]
+        elif source == "my-private":
+            return [
+                browser_api_module.CustomImageInfo(
+                    image_id="img-shared",
+                    url="registry/personal-visible",
+                    name="personal-visible-img",
                     framework="PT",
                     version="2.0",
                     source="SOURCE_PRIVATE",
                     status="READY",
                     description="",
                     created_at="",
-                )
+                ),
+                browser_api_module.CustomImageInfo(
+                    image_id="img-my-priv",
+                    url="registry/my-private",
+                    name="my-private-img",
+                    framework="PT",
+                    version="2.1",
+                    source="SOURCE_PRIVATE",
+                    status="READY",
+                    description="",
+                    created_at="",
+                ),
             ]
         return []
 
@@ -396,11 +530,13 @@ def test_image_list_all_sources(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert result.exit_code == 0
 
     payload = json.loads(result.output)
-    # official + public (empty) + private = 2
-    assert payload["data"]["total"] == 2
+    # official + public + private + my-private with one shared image_id deduped
+    assert payload["data"]["total"] == 4
     names = [img["name"] for img in payload["data"]["images"]]
     assert "official-img" in names
-    assert "private-img" in names
+    assert "public-img" in names
+    assert "personal-visible-img" in names
+    assert "my-private-img" in names
 
 
 def test_image_list_all_sources_partial_failure(
@@ -430,15 +566,17 @@ def test_image_list_all_sources_partial_failure(
                 browser_api_module.CustomImageInfo(
                     image_id="img-priv",
                     url="registry/priv",
-                    name="private-img",
+                    name="personal-visible-img",
                     framework="PT",
                     version="2.0",
-                    source="SOURCE_PRIVATE",
+                    source="SOURCE_PUBLIC",
                     status="READY",
                     description="",
                     created_at="",
                 )
             ]
+        if source == "my-private":
+            return []
         return []
 
     monkeypatch.setattr(browser_api_module, "list_images_by_source", fake_list_by_source)
@@ -519,6 +657,57 @@ def test_image_detail_human(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     assert result.exit_code == 0
     assert "Image Detail" in result.output
     assert "detail-img" in result.output
+
+
+def test_image_detail_partial_id_resolves_with_my_private_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_config_and_session(monkeypatch, tmp_path)
+
+    full_image_id = "abcdef12-1111-2222-3333-444444444444"
+    called_sources: list[str] = []
+    resolved_ids: list[str] = []
+
+    def fake_list_images_by_source(source="official", session=None):
+        called_sources.append(source)
+        if source == "my-private":
+            return [
+                browser_api_module.CustomImageInfo(
+                    image_id=full_image_id,
+                    url="registry/my-private:v1",
+                    name="my-private-img",
+                    framework="pytorch",
+                    version="2.1",
+                    source="SOURCE_PRIVATE",
+                    status="READY",
+                    description="",
+                    created_at="",
+                )
+            ]
+        return []
+
+    def fake_get_image_detail(image_id, session=None):
+        resolved_ids.append(image_id)
+        return browser_api_module.CustomImageInfo(
+            image_id=image_id,
+            url="registry/my-private:v1",
+            name="my-private-img",
+            framework="pytorch",
+            version="2.1",
+            source="SOURCE_PRIVATE",
+            status="READY",
+            description="",
+            created_at="",
+        )
+
+    monkeypatch.setattr(browser_api_module, "list_images_by_source", fake_list_images_by_source)
+    monkeypatch.setattr(browser_api_module, "get_image_detail", fake_get_image_detail)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["--json", "image", "detail", "abcdef12"])
+    assert result.exit_code == 0
+    assert "my-private" in called_sources
+    assert resolved_ids == [full_image_id]
 
 
 def test_image_register_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

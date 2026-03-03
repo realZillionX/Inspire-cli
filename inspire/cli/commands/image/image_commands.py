@@ -33,7 +33,8 @@ from inspire.platform.web import browser_api as browser_api_module
 # Helpers
 # ---------------------------------------------------------------------------
 
-_SOURCE_CHOICES = ("official", "public", "private", "all")
+_SOURCE_CHOICES = ("official", "public", "private", "my-private", "all")
+_ALL_SOURCE_KEYS = ("official", "public", "private", "my-private")
 
 
 def _image_to_dict(img: browser_api_module.CustomImageInfo) -> dict:
@@ -49,6 +50,20 @@ def _image_to_dict(img: browser_api_module.CustomImageInfo) -> dict:
         "description": img.description,
         "created_at": img.created_at,
     }
+
+
+def _dedupe_images_by_id(images: list[dict]) -> list[dict]:
+    """Deduplicate image dictionaries by image_id while preserving order."""
+    deduped: list[dict] = []
+    seen_ids: set[str] = set()
+    for image in images:
+        image_id = str(image.get("image_id", "")).strip()
+        if image_id:
+            if image_id in seen_ids:
+                continue
+            seen_ids.add(image_id)
+        deduped.append(image)
+    return deduped
 
 
 def _resolve_image_id(
@@ -73,7 +88,7 @@ def _resolve_image_id(
 
     try:
         all_images: list[browser_api_module.CustomImageInfo] = []
-        for src_key in ("official", "public", "private"):
+        for src_key in _ALL_SOURCE_KEYS:
             items = browser_api_module.list_images_by_source(source=src_key, session=session)
             all_images.extend(items)
     except Exception:
@@ -127,7 +142,8 @@ def list_images_cmd(
     \b
     Examples:
         inspire image list                     # Official images
-        inspire image list --source private    # Your custom images
+        inspire image list --source private    # Personal-visible images
+        inspire image list --source my-private # Direct SOURCE_PRIVATE images
         inspire image list --source all        # All sources
         inspire image list --source all --json # JSON output
     """
@@ -147,7 +163,7 @@ def list_images_cmd(
 
     try:
         if source == "all":
-            for src_key in ("official", "public", "private"):
+            for src_key in _ALL_SOURCE_KEYS:
                 try:
                     items = browser_api_module.list_images_by_source(
                         source=src_key, session=session
@@ -156,6 +172,8 @@ def list_images_cmd(
                     warnings.append(f"{src_key}: {e}")
                     continue
                 results.extend(_image_to_dict(img) for img in items)
+
+            results = _dedupe_images_by_id(results)
 
             if not results and warnings:
                 raise ValueError("; ".join(warnings))

@@ -77,13 +77,21 @@ def list_images_by_source(
     and ``created_at`` populated from the raw API response.
 
     Args:
-        source: One of ``"official"``, ``"public"``, ``"private"``.
+        source: One of:
+            - ``"official"``: platform official images.
+            - ``"public"``: publicly visible images.
+            - ``"private"``: personal-visible images in UI semantics
+              (``visibility=VISIBILITY_PRIVATE`` across private/public source list).
+            - ``"my-private"``: direct ``SOURCE_PRIVATE`` images.
         session: Existing web session.
     """
     source_map = {
         "official": "SOURCE_OFFICIAL",
         "public": "SOURCE_PUBLIC",
-        "private": "SOURCE_PRIVATE",
+        # UI "个人可见镜像": private visibility across both private/public sources.
+        "private": "SOURCE_PERSONAL_VISIBLE",
+        # Back-compat direct source mapping for SOURCE_PRIVATE-only queries.
+        "my-private": "SOURCE_PRIVATE",
     }
     api_source = source_map.get(source.lower(), source)
 
@@ -96,6 +104,16 @@ def list_images_by_source(
             "filter": {
                 "source_list": ["SOURCE_PRIVATE", "SOURCE_PUBLIC"],
                 "visibility": "VISIBILITY_PUBLIC",
+                "registry_hint": {"workspace_id": workspace_id},
+            },
+        }
+    elif api_source == "SOURCE_PERSONAL_VISIBLE":
+        body = {
+            "page": 0,
+            "page_size": -1,
+            "filter": {
+                "source_list": ["SOURCE_PRIVATE", "SOURCE_PUBLIC"],
+                "visibility": "VISIBILITY_PRIVATE",
                 "registry_hint": {"workspace_id": workspace_id},
             },
         }
