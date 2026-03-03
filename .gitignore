@@ -51,5 +51,7 @@ config.toml.example
 
 # Development/exploration scripts (contain hardcoded IDs)
 scripts/
+!scripts/
+!scripts/bootstrap_inspire_env.sh
 API_ENDPOINTS.md
 .playwright-cli/

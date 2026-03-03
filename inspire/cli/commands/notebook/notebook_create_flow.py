@@ -243,6 +243,21 @@ def _match_cpu_only_compute_group(
     if not candidates:
         return None, ""
 
+    preferred_names = ("CPU资源-2", "HPC-可上网区资源-2")
+
+    def _prefer(groups: list[dict]) -> dict | None:
+        for preferred in preferred_names:
+            for g in groups:
+                if (g.get("name") or "").strip() == preferred:
+                    return g
+        for g in groups:
+            if "CPU资源-2" in (g.get("name") or ""):
+                return g
+        for g in groups:
+            if "HPC-可上网区资源-2" in (g.get("name") or ""):
+                return g
+        return None
+
     # Probe resource prices to find groups that actually have CPU resources.
     if workspace_id and session:
         groups_with_resources: list[dict] = []
@@ -263,6 +278,9 @@ def _match_cpu_only_compute_group(
                 continue
 
         if groups_with_resources:
+            preferred = _prefer(groups_with_resources)
+            if preferred is not None:
+                return preferred, ""
             # Prefer CPU-named groups among those with resources.
             for group in groups_with_resources:
                 if "CPU" in (group.get("name") or "").upper():
@@ -270,6 +288,9 @@ def _match_cpu_only_compute_group(
             return groups_with_resources[0], ""
 
     # No session or all probes failed — fall back to name-based heuristic.
+    preferred = _prefer(candidates)
+    if preferred is not None:
+        return preferred, ""
     for group in candidates:
         if "CPU" in (group.get("name") or "").upper():
             return group, ""
@@ -327,6 +348,48 @@ def resolve_notebook_compute_group(
         _handle_error(ctx, "APIError", f"Error fetching compute groups: {e}", EXIT_API_ERROR)
         return None
 
+    if gpu_count == 0:
+        # For CPU notebooks, always use the dedicated CPU selector.
+        # This avoids accidentally binding to generic/non-preferred groups.
+        api_ids = {g.get("logic_compute_group_id") for g in compute_groups}
+        try:
+            from inspire.platform.web.browser_api.notebooks import (
+                _config_compute_groups_fallback,
+            )
+
+            config_groups = _config_compute_groups_fallback(workspace_id=workspace_id)
+            for cg in config_groups:
+                if cg.get("logic_compute_group_id") not in api_ids:
+                    compute_groups.append(cg)
+        except Exception:
+            pass
+
+        selected_group, selected_gpu_type = _match_cpu_only_compute_group(
+            compute_groups, workspace_id=workspace_id, session=session
+        )
+        if not selected_group:
+            hint = _build_compute_group_hint(compute_groups=compute_groups, gpu_count=gpu_count)
+            _handle_error(
+                ctx,
+                "ValidationError",
+                f"No compute group found with resource type matching '{gpu_pattern}'",
+                EXIT_CONFIG_ERROR,
+                hint=hint,
+            )
+            return None
+
+        logic_compute_group_id = selected_group.get("logic_compute_group_id")
+        if not logic_compute_group_id:
+            _handle_error(
+                ctx,
+                "APIError",
+                "Selected compute group is missing logic_compute_group_id",
+                EXIT_API_ERROR,
+            )
+            return None
+
+        return logic_compute_group_id, selected_gpu_type, gpu_pattern, resource_display
+
     selected_group = None
     selected_gpu_type = ""
     if auto_selected_group:
@@ -345,24 +408,6 @@ def resolve_notebook_compute_group(
         selected_group, selected_gpu_type = _match_compute_group_by_gpu_type(
             compute_groups=compute_groups,
             gpu_pattern=gpu_pattern,
-        )
-    if not selected_group and gpu_count == 0:
-        # The API listing may not return all CPU compute groups.  Merge in
-        # config-based groups so resource probing can find groups the API missed.
-        api_ids = {g.get("logic_compute_group_id") for g in compute_groups}
-        try:
-            from inspire.platform.web.browser_api.notebooks import (
-                _config_compute_groups_fallback,
-            )
-
-            config_groups = _config_compute_groups_fallback(workspace_id=workspace_id)
-            for cg in config_groups:
-                if cg.get("logic_compute_group_id") not in api_ids:
-                    compute_groups.append(cg)
-        except Exception:
-            pass
-        selected_group, selected_gpu_type = _match_cpu_only_compute_group(
-            compute_groups, workspace_id=workspace_id, session=session
         )
 
     if not selected_group:

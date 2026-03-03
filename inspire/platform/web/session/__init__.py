@@ -92,6 +92,8 @@ def request_json(
                 req_headers = dict(req_headers)
                 req_headers["Content-Type"] = "application/json"
                 resp = http.post(url, headers=req_headers, json=body or {}, timeout=timeout)
+            elif method_upper == "DELETE":
+                resp = http.delete(url, headers=req_headers, timeout=timeout)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
 

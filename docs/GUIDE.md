@@ -1,39 +1,183 @@
-# 启智平台使用规范指南（面向 Agent 架构）
+# 启智平台实践 GUIDE（Agent 版）
 
-请注意，鉴于启智平台的基础设施会不定期进行迭代与更新，本指南需结合开发实践持续进行维护。若文档记录与平台具体情况存在不符之处，请以平台的实际状态为准。目前，平台中的“所属项目”一栏已统一收拢为“CI-情境智能-探索课题”，团队所有的课题研究与开发工作均须依托于该大项目下执行。
+本文档给出一条可直接执行的启智平台工作流。若平台行为与文档不一致，以平台实时行为为准，并将差异回写文档。
 
-## 一、 项目开发与环境配置流程
+默认项目域：`CI-情境智能-探索课题`。
 
-### 1. 容器环境配置（基于 CPU 资源）
+---
 
-在开发初期，推荐在 CPU 资源空间下的“HPC-可上网区资源-2”分区中，创建一个名为“xxx-container-config”的交互式建模实例。需要明确的是，平台的“可上网”专指具备内网访问权限，而常规的计算节点处于完全断网状态。因此，若需下载外部网络中的数据、代码或安装第三方依赖库，必须通过配置内网镜像站或代理服务来实现外网访问。环境配置完成后，需将当前容器实例保存为项目特定的标准镜像（例如命名为“xxx”）。后续若有环境变更需求，可重新启动该交互式建模实例进行调整，并覆盖保存镜像。
+## 1. 总体原则
 
-### 2. 高性能计算与数据处理（基于 CPU 资源）
+- 先本地开发，再上平台放大规模。
+- 写操作优先验证，不只做只读查询。
+- 仅操作 `codex-skill-<timestamp>-*` 临时对象。
+- 不触碰已有分布式训练实例。
 
-平台支持通过 Slurm 任务系统启动多 CPU 并行的计算任务，通常适用于大规模数据的预处理与生成阶段。“CPU资源-2”与“HPC-可上网区资源-2”两个分区均可用于执行此类任务。若任务执行过程中需要进行内网通信或通过代理进行外网交互，请务必选择“HPC-可上网区资源-2”。为提高计算效率并规避分布式任务中网络配置的复杂性，强烈建议在镜像配置阶段预先下载好所有所需资源，以实现计算任务与外部网络的彻底解耦。
+CPU 资源空间的 CPU 任务必须优先。
 
-资源规格对比与调度建议如下：
+- `CPU资源-2`。
+- `HPC-可上网区资源-2`。
 
-* “CPU资源-2”分区：该分区常态下具备上万核空闲 CPU，资源极其充裕。单节点 CPU 上限可达 120 核。在资源申请时，建议设置子任务数量与节点数严格对应，单任务配置 120 核 CPU，且单核分配内存应控制在 4G 以内。
-* “HPC-可上网区资源-2”分区：该分区常态下空闲 CPU 约为数千核。单节点 CPU 上限为 55 核。建议设置子任务数量与节点数严格对应，单任务配置 55 核 CPU，且单核分配内存应控制在 9G 以内。
+---
 
-综合考量，大多数无需网络交互的高性能计算任务应优先分配至“CPU资源-2”分区执行。
+## 2. 一次性初始化
 
-### 3. 可上网区 GPU 资源评估
+```bash
+# 生成 env 模板并创建本地 env 文件。
+./scripts/bootstrap_inspire_env.sh
 
-该资源区域目前仅提供少量 RTX 4090 显卡。其核心特性仅在于具备内网连通性（同样需配置代理或镜像以访问外网）。鉴于网络互联需求已可通过 HPC 的 CPU 资源区满足，且该 GPU 区算力规模较小，在日常核心开发与训练中不建议规划使用此部分资源。
+# 编辑 .env.inspire.local 后加载到当前 shell。
+set -a; source .env.inspire.local; set +a
 
-### 4. 分布式训练空间（核心 GPU 计算区）
+# 初始化项目配置并校验。
+inspire init --project --force
+inspire config env --output .env.inspire.generated
+inspire config check --json
+```
 
-该空间是团队开展主体模型分布式训练的核心计算区域。平台提供了多种计算类型组，其中“cuda12.8版本H100”集群通常具有最大的算力余量，常态下可提供数百张 H100 计算卡的空闲资源。此外，“H200-1号机房”、“H200-2号机房”、“H200-3号机房”等集群也配备了充足的 H200 算力资源。
+代理分流约定。
 
-分布式训练的标准工作流如下：
+- `*.sii.edu.cn`：`requests -> http://127.0.0.1:8888`，`playwright/rtunnel -> socks5://127.0.0.1:1080`。
+- 公网：`7897` 代理链路。
 
-* 初步调试：基于环境配置阶段保存的专属镜像，新建一个交互式建模实例（推荐算力规格为单节点 8 GPU 配合 160 CPU），在该实例上进行小规模的模型前向与反向传播调试。
-* 任务提交：在调试无误后，将任务转入平台提供的“分布式训练”模块进行提交。请注意，此处的“分布式训练”为平台特定的任务类型，有别于高性能计算任务所需的完整 Slurm 脚本，用户只需在提交界面的终端内执行命令（如bash xxx.sh）即可拉起训练。
-* 规模配置：在执行大规模分布式任务时，建议分配 5 个以上的计算节点，单节点选择（8 GPU 配合 180 CPU）的算力规格，并挂载 300GB 容量以上的共享内存。
+OpenAPI 代理优先级。
 
-## 二、 平台调度策略与存储最佳实践
+1. `INSPIRE_REQUESTS_HTTP_PROXY`／`INSPIRE_REQUESTS_HTTPS_PROXY`。
+2. TOML `[proxy].requests_http`／`[proxy].requests_https`。
+3. 系统 `http_proxy`／`https_proxy`。
 
-* 任务调度与抢卡策略（高优与低优机制）：平台对“CI-情境智能-探索课题”设定了整体的计算资源配额限制。高优先级的任务在运行时会严格计入该配额，因此当总配额耗尽时，高优任务会处于排队状态。相对而言，低优先级的任务不占用固定配额，可以在集群存在空闲算力且高优任务排队时见缝插针地运行。但其代价在于，一旦系统出现高优任务的资源请求，低优任务将被强制中断并释放资源。因此，在提交低优任务时，必须实现高频的检查点（Checkpoint）保存机制，建议将其保存间隔设置为低于高优任务的阈值。
-* 存储空间分配规范：在文件管理方面，建议将代码、配置脚本等轻量化工程文件保存于个人账户的专属目录下（例如/inspire/hdd/project/exploration-topic/tongjingqi-CZXS25110029/chj_code或/inspire/ssd/project/exploration-topic/tongjingqi-CZXS25110029/chj_code）。对于数据集、模型检查点等大体积文件，应集中存放于公共数据目录下（例如/inspire/hdd/project/exploration-topic/public或/inspire/ssd/project/exploration-topic/public）。在存储介质的选择上，推荐优先挂载 SSD 路径以期望获得更高的 I/O 吞吐率，尽管目前的压测数据显示 SSD 与 HDD 之间在性能上暂未呈现出显著的量级差异。
+---
+
+## 3. 阶段化工作流
+
+### 3.1 本地代码开发
+
+- 完成模型、数据、训练脚本与配置。
+- 本地小样本先跑通。
+- 保持清晰 git 提交历史。
+
+### 3.2 代码同步到启智
+
+优先 `inspire sync`。
+
+```bash
+inspire sync
+inspire bridge exec "cd $INSPIRE_TARGET_DIR && git log -1"
+```
+
+断网桥或特殊场景可用。
+
+```bash
+inspire sync --allow-dirty --no-push --source bundle
+```
+
+文件级传输。
+
+```bash
+inspire tunnel ssh-config --install
+scp ./file <bridge_name>:/path/
+rsync -avz ./dir/ <bridge_name>:/path/
+```
+
+### 3.3 CPU 空间做容器配置
+
+```bash
+inspire notebook create \
+  --workspace cpu \
+  --resource 4CPU \
+  --name codex-skill-<ts>-container-config \
+  --project CI-情境智能-探索课题 \
+  --wait --json
+
+inspire image save <notebook_id> -n codex-skill-<ts>-img -v v1 --json
+```
+
+### 3.4 CPU 预处理（HPC）
+
+先发现规格，再提交。
+
+```bash
+inspire resources specs --workspace cpu --group CPU资源-2 --json
+
+inspire hpc create \
+  -n codex-skill-<ts>-hpc \
+  -c 'bash -lc "python preprocess.py"' \
+  --logic-compute-group-id <logic_compute_group_id> \
+  --spec-id <spec_id> \
+  --workspace cpu \
+  --cpus-per-task <cpu_count> \
+  --memory-per-cpu <mem_per_cpu_gib> \
+  --priority 10
+```
+
+若长时间排队或限流。
+
+- 切低优先级（如 `--priority 10`）。
+- 退避重试（10／20／30 秒）。
+- 仍失败则转 `job create` 路径并保留上下文。
+
+### 3.5 分布式训练空间
+
+交互式调试。
+
+```bash
+inspire notebook create \
+  --workspace gpu \
+  --resource 1xH100 \
+  --name codex-skill-<ts>-gpu-debug \
+  --wait --json
+```
+
+任务提交。
+
+```bash
+# job create。
+inspire job create \
+  -n codex-skill-<ts>-job \
+  -r 1xH100 \
+  -c 'echo train && sleep 300' \
+  --workspace gpu \
+  --location 'cuda12.8版本H100' \
+  --no-auto \
+  --image 'docker.sii.shaipower.online/inspire-studio/mova:2'
+
+# run 快速提交。
+inspire run 'echo train && sleep 300' \
+  --gpus 1 --type h100 \
+  --workspace gpu \
+  --location 'cuda12.8版本H100' \
+  --image 'docker.sii.shaipower.online/inspire-studio/mova:2'
+```
+
+---
+
+## 4. 命令注意事项（实测修正）
+
+- `inspire image set-default` 必须使用 `--job` 和／或 `--notebook`，不能只传 `<image_id>`。
+- `inspire image delete <image_id>` 已支持真实删除链路。
+- `inspire tunnel remove` 不支持 `--force`。
+- `inspire notebook ssh` 受 `allow_ssh` 约束，先看 `notebook status --json` 的 `start_config.allow_ssh`。
+
+---
+
+## 5. 调度与存储实践
+
+### 5.1 调度
+
+- 高优任务：保障更强，配额受限。
+- 低优任务：易被抢占，适合“能断点恢复”的大批任务。
+
+低优任务务必高频 checkpoint。
+
+### 5.2 存储
+
+- 代码与轻量脚本：个人目录。
+- 数据、权重、checkpoint：公共目录。
+- `INSPIRE_TARGET_DIR` 建议使用团队统一共享路径。
+
+---
+
+## 6. 与 Skill 的关系
+
+`SKILL.md` 是本 GUIDE 的可执行黑盒手册版本。建议优先按 `SKILL.md` 执行，遇到差异以实测结果回写本 GUIDE。
+

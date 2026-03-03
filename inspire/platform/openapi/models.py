@@ -50,3 +50,7 @@ class InspireConfig:
     docker_registry: Optional[str] = None  # Docker registry hostname
     # Compute groups configuration
     compute_groups: Optional[list[dict]] = None  # List of compute group dicts from config
+    # Proxy configuration
+    force_proxy: bool = False
+    requests_http_proxy: Optional[str] = None
+    requests_https_proxy: Optional[str] = None

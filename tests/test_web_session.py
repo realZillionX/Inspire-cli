@@ -37,6 +37,10 @@ class DummyHTTP:
         self.calls.append(("POST", url, headers, json, timeout))
         return self.response
 
+    def delete(self, url, headers=None, timeout=None):  # noqa: ANN001
+        self.calls.append(("DELETE", url, headers, timeout))
+        return self.response
+
     def close(self) -> None:
         pass
 
@@ -70,6 +74,10 @@ class DummyRequestContext:
 
     def post(self, url, headers=None, data=None, timeout=None):  # noqa: ANN001
         self.calls.append(("POST", url, headers, data, timeout))
+        return DummyAPIResponse(200, {"ok": True})
+
+    def delete(self, url, headers=None, timeout=None):  # noqa: ANN001
+        self.calls.append(("DELETE", url, headers, None, timeout))
         return DummyAPIResponse(200, {"ok": True})
 
 
@@ -149,6 +157,25 @@ def test_request_json_non_json_triggers_fallback(monkeypatch: pytest.MonkeyPatch
     assert ws._BROWSER_API_FORCE_BROWSER is True
     assert http.calls
     assert browser.calls
+
+
+def test_request_json_supports_delete(monkeypatch: pytest.MonkeyPatch):
+    session = WebSession(
+        storage_state={"cookies": [{"name": "session", "value": "abc"}]},
+        cookies={"session": "abc"},
+        workspace_id="ws-test",
+        created_at=0,
+    )
+
+    http = DummyHTTP(DummyResponse(200, payload={"ok": True}))
+
+    monkeypatch.setattr(ws, "build_requests_session", lambda _session, _url: http)
+    monkeypatch.setattr(ws, "_BROWSER_API_FORCE_BROWSER", False)
+
+    result = ws.request_json(session, "DELETE", "https://example.test/api/v1/image/image-1")
+
+    assert result == {"ok": True}
+    assert http.calls == [("DELETE", "https://example.test/api/v1/image/image-1", {}, 30)]
 
 
 def test_browser_client_reset_on_expired(monkeypatch: pytest.MonkeyPatch):
@@ -264,6 +291,21 @@ def test_browser_request_context_posts_json_bytes():
     assert json.loads(data) == {"a": 1}
     header_keys = {key.lower() for key in (headers or {})}
     assert "content-type" in header_keys
+
+
+def test_browser_request_context_supports_delete():
+    client = ws._BrowserRequestClient.__new__(ws._BrowserRequestClient)
+    context = DummyBrowserContext()
+    client._context = context
+    client._closed = False
+    client.session_fingerprint = "test"
+
+    result = client.request_json("DELETE", "https://example.test/api/v1/image/image-1")
+
+    assert result == {"ok": True}
+    assert context.request.calls
+    method, _url, _headers, _data, _timeout = context.request.calls[0]
+    assert method == "DELETE"
 
 
 def test_browser_client_cache_is_thread_local(monkeypatch: pytest.MonkeyPatch):

@@ -46,6 +46,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 DEFAULT_SHM_ENV_VAR = "INSPIRE_SHM_SIZE"
+_TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def _get_default_shm_size(fallback: int = 200) -> int:
@@ -70,6 +71,52 @@ def _get_default_shm_size(fallback: int = 200) -> int:
                 fallback,
             )
     return fallback
+
+
+def _as_bool(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    return text in _TRUE_VALUES
+
+
+def _normalize_proxy(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _build_http_https_pair(http_value: object, https_value: object) -> dict[str, str]:
+    http_proxy = _normalize_proxy(http_value)
+    https_proxy = _normalize_proxy(https_value)
+    if not http_proxy and not https_proxy:
+        return {}
+    return {
+        "http": http_proxy or https_proxy,
+        "https": https_proxy or http_proxy,
+    }
+
+
+def _resolve_openapi_request_proxies(config: InspireConfig) -> tuple[dict[str, str], str]:
+    explicit_http = _normalize_proxy(os.environ.get("INSPIRE_REQUESTS_HTTP_PROXY"))
+    explicit_https = _normalize_proxy(os.environ.get("INSPIRE_REQUESTS_HTTPS_PROXY"))
+    if explicit_http or explicit_https:
+        return _build_http_https_pair(explicit_http, explicit_https), "explicit_env"
+
+    toml_http = _normalize_proxy(getattr(config, "requests_http_proxy", None))
+    toml_https = _normalize_proxy(getattr(config, "requests_https_proxy", None))
+    if toml_http or toml_https:
+        return _build_http_https_pair(toml_http, toml_https), "toml"
+
+    system_http = _normalize_proxy(os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY"))
+    system_https = _normalize_proxy(os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY"))
+    if system_http or system_https:
+        return _build_http_https_pair(system_http, system_https), "system_env"
+
+    return {}, "none"
+
+
+def _resolve_force_proxy(config: InspireConfig) -> bool:
+    explicit_force = os.environ.get("INSPIRE_FORCE_PROXY")
+    if explicit_force is not None:
+        return _as_bool(explicit_force)
+    return bool(getattr(config, "force_proxy", False))
 
 
 class InspireAPI:
@@ -130,21 +177,26 @@ class InspireAPI:
 
         # Use simple requests session
         self.session = requests.Session()
-        # Enable proxy and no_proxy support from environment by default
+        # Keep system env/no_proxy behavior unless force proxy is explicitly enabled.
         self.session.trust_env = True
+        proxies, proxy_source = _resolve_openapi_request_proxies(self.config)
+        if proxies:
+            self.session.proxies = proxies
+            logger.debug("OpenAPI request proxies (%s): %s", proxy_source, proxies)
 
-        # Optional override: force using proxy even if no_proxy would normally bypass it.
-        # This preserves the previous WSL corporate-proxy workaround when needed.
-        if os.getenv("INSPIRE_FORCE_PROXY", "").lower() in ("1", "true", "yes"):
-            http_proxy = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY")
-            https_proxy = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
-            if http_proxy or https_proxy:
-                self.session.proxies = {
-                    "http": http_proxy or https_proxy,
-                    "https": https_proxy or http_proxy,
-                }
+        if _resolve_force_proxy(self.config):
+            # Disable trust_env to prevent no_proxy/system proxy bypass when force_proxy is enabled.
+            self.session.trust_env = False
+            if proxies:
                 logger.debug(
-                    f"INSPIRE_FORCE_PROXY enabled, using explicit proxy configuration: {self.session.proxies}"
+                    "OpenAPI force_proxy enabled; enforcing resolved proxies (%s): %s",
+                    proxy_source,
+                    proxies,
+                )
+            else:
+                logger.warning(
+                    "OpenAPI force_proxy enabled, but no proxy is configured "
+                    "(checked INSPIRE_REQUESTS_*_PROXY, TOML [proxy], and system *_proxy env)."
                 )
 
     def _validate_required_params(self, **kwargs) -> None:

@@ -55,6 +55,8 @@ class _BrowserRequestClient:
                 data=json.dumps(body or {}),
                 timeout=timeout_ms,
             )
+        elif method_upper == "DELETE":
+            resp = self._context.request.delete(url, headers=req_headers, timeout=timeout_ms)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
 
