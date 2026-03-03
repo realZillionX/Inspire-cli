@@ -4,7 +4,7 @@
 - `inspire/` is the main Python package.
 - CLI entry point: `inspire/cli/main.py`; top-level command registration is in `inspire/cli/commands/__init__.py`.
 - CLI command modules live in `inspire/cli/commands/`:
-  - Group packages: `bridge/`, `config/`, `image/`, `init/`, `job/`, `notebook/`, `project/`, `resources/`, `tunnel/`
+  - Group packages: `bridge/`, `config/`, `hpc/`, `image/`, `init/`, `job/`, `notebook/`, `project/`, `resources/`, `tunnel/`
   - Top-level command modules: `run.py`, `sync.py`
 - Command package conventions:
   - Most groups use thin `__init__.py` files (Click group + `add_command` calls), with implementation in submodules.
@@ -13,12 +13,13 @@
   - `bridge/`: `exec_cmd.py`, `ssh_cmd.py`, `scp_cmd.py`
   - `tunnel/`: `add.py`, `remove.py`, `status.py`, `list_cmd.py`, `update.py`, `set_default.py`, `ssh_config.py`, `test_cmd.py`
   - `config/`: `check.py`, `show.py`, `env_cmd.py`
+  - `hpc/`: `hpc_commands.py`
   - `init/`: `init_cmd.py`, `discover.py`, `templates.py`, `env_detect.py`, `toml_helpers.py`, `errors.py`, `json_report.py`
   - `image/`: `image_commands.py` (list, detail, register, save, delete, set-default)
   - `job/`: `job_commands.py`, `job_create.py`, `job_logs.py`, `job_deps.py`
   - `notebook/`: `notebook_commands.py`, `notebook_create_flow.py`, `top.py`
   - `project/`: `project_commands.py`
-  - `resources/`: `resources_list.py`, `resources_nodes.py`
+  - `resources/`: `resources_list.py`, `resources_nodes.py`, `resources_specs.py`
 - Formatters: `inspire/cli/formatters/human_formatter.py` (human-readable) and `json_formatter.py` (machine-readable).
 - Domain packages (preferred for shared logic used by CLI):
   - `inspire/config/`: config models, TOML/env loading, schema/options, runtime helpers.
@@ -28,10 +29,10 @@
   - `inspire/platform/web/browser_api/`: split domain modules including `availability/`, `jobs.py`, `notebooks.py`, `images.py`, `projects.py`, `workspaces.py`, `playwright_notebooks.py`, `rtunnel.py`.
   - `inspire/bridge/tunnel/`: tunnel config/models + rtunnel/ssh/scp/sync helpers.
   - `inspire/bridge/forge/`: Forge/Gitea workflow, logs, artifacts, and API helpers.
-- `tests/` contains pytest suites across CLI, bridge/tunnel, openapi, web session, and notebook flows (for example, `tests/test_cli_commands.py`, `tests/test_cli_smoke.py`).
+- `tests/` contains pytest suites across CLI, bridge/tunnel, openapi, web session, notebook flows, and recent regressions (for example, `tests/test_cli_commands.py`, `tests/test_cli_smoke.py`, `tests/test_openapi_proxy_config.py`, `tests/test_resources_specs_command.py`, `tests/test_cpu_compute_group_fixes.py`).
 - `examples/` holds workflow YAML examples for Gitea/Forgejo usage.
-- `scripts/` contains internal exploration/automation utilities and is gitignored.
-- `docs/` and `README.md` document usage; `bin/inspire` is a repo-local wrapper.
+- `scripts/` is mostly ignored, but `scripts/bootstrap_inspire_env.sh` is intentionally tracked.
+- `docs/` currently includes `inspire.env.template` and OpenAPI reference notes; `README.md` is the user-facing command guide; `bin/inspire` is a repo-local wrapper.
 
 ## Build, Test, and Development Commands
 - Prefer `uv` for all Python/CLI invocations (`uv run ...`, `uv tool run ...`); avoid system `python`/`pip`.
@@ -39,6 +40,7 @@
 - `uv venv .venv && uv pip install -e .` creates a local venv and installs the package for development.
 - `uv run inspire --help` validates the entry point (works without a global install).
 - `uv run pytest` runs the test suite.
+- If `uv run pytest` cannot find the pytest entrypoint in your local environment, use `uv run --with pytest python -m pytest`.
 - `uv run pytest -m integration` runs integration tests that require live API access.
 - `uv run ruff check inspire tests` and `uv run black --check inspire tests` match CI lint/format checks.
 - `uv tool run black .` formats the repo when needed.
@@ -66,7 +68,10 @@
 ## Testing Guidelines
 - Tests live under `tests/` and use pytest.
 - Integration tests are marked with `@pytest.mark.integration`; keep them isolated from unit tests and avoid requiring live credentials in standard runs.
-- `tests/test_cli_smoke.py` validates `--help` output and key command presence; update it when adding/removing top-level command groups in `inspire/cli/main.py`.
+- `tests/test_cli_smoke.py` validates `--help` output and key command presence; update it when adding/removing top-level command groups in `inspire/cli/main.py` (including `hpc`).
+- For proxy/config changes, run `tests/test_openapi_proxy_config.py`, `tests/test_web_session_proxy.py`, and `tests/test_web_config_resolution.py`.
+- For image-source behavior changes, run `tests/test_image_commands.py` (covers `private`/`my-private`/`all` semantics and image-id resolution).
+- For resource selection changes, run `tests/test_resources_specs_command.py`, `tests/test_cpu_compute_group_fixes.py`, and `tests/test_notebook_create_flow.py`.
 
 ## Commit & Pull Request Guidelines
 - Prefer concise, imperative commit subjects. Conventional-commit prefixes are acceptable when useful.
@@ -77,19 +82,34 @@
   1. `~/.config/inspire/config.toml` (global)
   2. `./.inspire/config.toml` (project)
   3. Environment variables
+- Default conflict precedence is env-over-TOML; `inspire config show` surfaces value sources and precedence.
 - Typical required inputs for authenticated commands are `INSPIRE_USERNAME`, `INSPIRE_PASSWORD` (or `[accounts."<username>"].password`), and `INSPIRE_TARGET_DIR`.
 - Gitea/Forge workflow sync and remote logs rely on `INSP_GITEA_REPO`, `INSP_GITEA_TOKEN`, and `INSP_GITEA_SERVER`.
 - Optional: `INSPIRE_SHM_SIZE` (or `job.shm_size` in config) sets default shared memory (GiB) for job and notebook creation.
 - Optional: `INSPIRE_BRIDGE_ACTION_TIMEOUT` (or `bridge.action_timeout` in config) sets default timeout (seconds) for `inspire bridge exec`.
 - Optional: `INSPIRE_BROWSER_API_PREFIX` overrides the default browser API path prefix.
+- Proxy precedence is unified as: explicit `INSPIRE_*_PROXY` env vars > layered TOML `[proxy]` > system `http_proxy`/`https_proxy`.
+- `INSPIRE_FORCE_PROXY` / `[api].force_proxy` disables `requests.Session.trust_env` for OpenAPI calls to prevent `no_proxy` or system bypass.
+- For `.sii.edu.cn` deployments, when request-side proxy resolves to `http://127.0.0.1:8888`, Playwright/rtunnel auto-fallback to `socks5://127.0.0.1:1080`.
+- `inspire config check` now validates placeholder hosts, required credentials, required Docker registry, and API authentication in one pass.
 - Never commit credentials/tokens. Prefer local env exports or local config; run `inspire config check` to validate setup.
 
 ## Public Sync & Ignore Policy
 - Treat `.gitignore` as the source of truth for non-public/internal artifacts.
-- Paths currently ignored/internal include `.inspire/`, `internal/`, `scripts/`, `scripts/bridge-tunnel-setup.sh`, `scripts/inspire-tunnel`, `API_ENDPOINTS.md`, `CLAUDE.md`, `config.toml.example`, `inspire/Inspire_OpenAPI_Reference.md`, `docs/rtunnel-ssh-setup.md`, and `.playwright-cli/`.
+- Paths currently ignored/internal include `.inspire/`, `internal/`, most of `scripts/` (except tracked `scripts/bootstrap_inspire_env.sh`), `API_ENDPOINTS.md`, `CLAUDE.md`, `config.toml.example`, `inspire/Inspire_OpenAPI_Reference.md`, `docs/rtunnel-ssh-setup.md`, and `.playwright-cli/`.
 - When preparing `github-public` sync, avoid introducing dependencies on ignored paths in docs, examples, tests, or command instructions.
 
-## Current Debug Status (rtunnel/browser automation)
+## Current Runtime Notes (Keep In Sync With Code)
+- `inspire resources specs` is the canonical preflight for notebook/HPC spec discovery; it emits `logic_compute_group_id`, `spec_id` (`quota_id`), CPU/memory/GPU fields, and workspace binding.
+- `inspire image list --source private` now maps to UI "个人可见镜像"; `--source my-private` preserves direct `SOURCE_PRIVATE`; `--source all` aggregates `official/public/private/my-private` and deduplicates by `image_id`.
+- Partial image-id resolution for `image detail/delete` scans the same four sources to avoid "list can see but detail cannot resolve" gaps.
+- `inspire image set-default` only accepts `--job` / `--notebook` targets (it does not take a positional `<image_id>`).
+- `inspire bridge exec` uses SSH tunnel by default; workflow transport is used only when artifact options are requested.
+- Deprecated flags are removed: `inspire bridge exec --no-tunnel` and `inspire sync --via-action`.
+- `inspire sync` uses explicit `--transport ssh|workflow`; SSH mode supports `--source auto|remote|bundle` and bridge internet-awareness fallback.
+- CPU notebook compute-group selection prefers `CPU资源-2` and `HPC-可上网区资源-2` when `gpu_count == 0`, and probes resource prices to avoid empty groups.
+- `inspire hpc create` retries with payload fallbacks when backend rejects `task_priority`/`priority` fields or requires string-typed `cpus_per_task` / `memory_per_cpu`.
+- Job subcommands (`list/status/stop/wait/update/command`) load layered config from files + env (not env-only).
 - `notebook ssh` setup prefers the direct Jupyter terminal API path first: create terminal via `POST .../api/terminals`, then send setup over terminal WebSocket (`.../terminals/websocket/<name>`). If WS delivery fails, fallback is Playwright UI terminal automation.
 - `open_notebook_lab()` now probes `/ide` briefly (short frame probe window) and falls back early to direct `/api/v1/notebook/lab/<id>/` navigation.
 - Session-expiry handling refreshes credentials in place: `request_json()` re-authenticates once and updates the same `WebSession` object.
