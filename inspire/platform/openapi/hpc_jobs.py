@@ -34,8 +34,8 @@ def create_hpc_job(
     instance_count: int = 1,
     task_priority: int = 6,
     number_of_tasks: int = 1,
-    cpus_per_task: int = 1,
-    memory_per_cpu: int = 4,
+    cpus_per_task: int | str = 1,
+    memory_per_cpu: int | str = "4G",
     enable_hyper_threading: bool = False,
 ) -> Dict[str, Any]:
     """Create an HPC job via /openapi/v1/hpc_jobs/create."""
@@ -63,8 +63,8 @@ def create_hpc_job(
         "instance_count": instance_count,
         "task_priority": task_priority,
         "number_of_tasks": number_of_tasks,
-        "cpus_per_task": cpus_per_task,
-        "memory_per_cpu": memory_per_cpu,
+        "cpus_per_task": str(cpus_per_task),
+        "memory_per_cpu": str(memory_per_cpu) if str(memory_per_cpu)[-1:].isalpha() else f"{memory_per_cpu}G",
         "enable_hyper_threading": enable_hyper_threading,
     }
 

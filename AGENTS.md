@@ -32,7 +32,7 @@
 - `tests/` contains pytest suites across CLI, bridge/tunnel, openapi, web session, notebook flows, and recent regressions (for example, `tests/test_cli_commands.py`, `tests/test_cli_smoke.py`, `tests/test_openapi_proxy_config.py`, `tests/test_resources_specs_command.py`, `tests/test_cpu_compute_group_fixes.py`).
 - `examples/` holds workflow YAML examples for Gitea/Forgejo usage.
 - `scripts/` is mostly ignored, but `scripts/bootstrap_inspire_env.sh` is intentionally tracked.
-- `docs/` currently includes `inspire.env.template` and OpenAPI reference notes; `README.md` is the user-facing command guide; `bin/inspire` is a repo-local wrapper.
+- `docs/` includes `inspire.env.template`, OpenAPI reference notes (`启智 高性能计算/分布式训练/模型部署 OpenAPI 文档.md`), and `SKILL.md` (agent skill playbook); `README.md` is the user-facing command guide; `bin/inspire` is a repo-local wrapper.
 
 ## Build, Test, and Development Commands
 - Prefer `uv` for all Python/CLI invocations (`uv run ...`, `uv tool run ...`); avoid system `python`/`pip`.
@@ -100,7 +100,7 @@
 - When preparing `github-public` sync, avoid introducing dependencies on ignored paths in docs, examples, tests, or command instructions.
 
 ## Current Runtime Notes (Keep In Sync With Code)
-- `inspire resources specs` is the canonical preflight for notebook/HPC spec discovery; it emits `logic_compute_group_id`, `spec_id` (`quota_id`), CPU/memory/GPU fields, and workspace binding.
+- `inspire resources specs` is the canonical preflight for **notebook** spec discovery; it emits `logic_compute_group_id`, `spec_id`, CPU/memory/GPU fields, and workspace binding. **HPC tasks use a separate `quota_id`** (not the same `spec_id`); obtain it from an existing HPC job via `inspire --json hpc status <job_id>` → `slurm_cluster_spec.predef_quota_id` or `resource_spec_price.quota_id`.
 - `inspire image list --source private` now maps to UI "个人可见镜像"; `--source my-private` preserves direct `SOURCE_PRIVATE`; `--source all` aggregates `official/public/private/my-private` and deduplicates by `image_id`.
 - Partial image-id resolution for `image detail/delete` scans the same four sources to avoid "list can see but detail cannot resolve" gaps.
 - `inspire image set-default` only accepts `--job` / `--notebook` targets (it does not take a positional `<image_id>`).
@@ -108,9 +108,11 @@
 - Deprecated flags are removed: `inspire bridge exec --no-tunnel` and `inspire sync --via-action`.
 - `inspire sync` uses explicit `--transport ssh|workflow`; SSH mode supports `--source auto|remote|bundle` and bridge internet-awareness fallback.
 - CPU notebook compute-group selection prefers `CPU资源-2` and `HPC-可上网区资源-2` when `gpu_count == 0`, and probes resource prices to avoid empty groups.
-- `inspire hpc create` retries with payload fallbacks when backend rejects `task_priority`/`priority` fields or requires string-typed `cpus_per_task` / `memory_per_cpu`.
+- `inspire hpc create` sends `memory_per_cpu` as a string with `G` suffix (e.g. `"4G"`) and `cpus_per_task` as a string, matching the OpenAPI spec. It retries with payload fallbacks when backend rejects `task_priority`/`priority` fields. `--image` must be a full docker address (e.g. `docker.sii.shaipower.online/inspire-studio/<name>:<version>`).
+- `make_request_with_retry()` in `inspire/platform/openapi/http.py` retries HTTP 429 (rate limit) responses with exponential backoff, in addition to 5xx errors.
 - Job subcommands (`list/status/stop/wait/update/command`) load layered config from files + env (not env-only).
-- `notebook ssh` setup prefers the direct Jupyter terminal API path first: create terminal via `POST .../api/terminals`, then send setup over terminal WebSocket (`.../terminals/websocket/<name>`). If WS delivery fails, fallback is Playwright UI terminal automation.
+- `notebook ssh` setup prefers the direct Jupyter terminal API path first: create terminal via `POST .../api/terminals`, then send setup over terminal WebSocket (`.../terminals/websocket/<name>`). If WS delivery fails, fallback is Playwright UI terminal automation. **WebSocket injection may silently fail**—`notebook ssh` reports "Sent setup script" but the container may have no `/tmp/rtunnel`; manual installation in the container Web terminal is then required.
+- rtunnel setup script now uses dynamic platform detection (`uname -s`/`uname -m`) inside the container to determine the correct binary download URL, instead of using the local machine's `platform.system()`/`platform.machine()` values.
 - `open_notebook_lab()` now probes `/ide` briefly (short frame probe window) and falls back early to direct `/api/v1/notebook/lab/<id>/` navigation.
 - Session-expiry handling refreshes credentials in place: `request_json()` re-authenticates once and updates the same `WebSession` object.
 - HTTP proxy readiness checks can still report transient failures (`404`, `ECONNREFUSED`) even when SSH succeeds. Treat HTTP probe as advisory; use SSH preflight (`inspire tunnel test`) as authoritative.

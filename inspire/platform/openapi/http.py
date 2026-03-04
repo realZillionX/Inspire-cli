@@ -30,8 +30,19 @@ def make_request_with_retry(
             else:
                 response = api.session.get(url, timeout=api.config.timeout, **kwargs)
 
-            if response.status_code < 500:
+            if response.status_code < 500 and response.status_code != 429:
                 return response
+
+            # 429 Too Many Requests — retry with backoff (documented rate limit).
+            if response.status_code == 429:
+                if attempt < api.config.max_retries:
+                    wait = api.config.retry_delay * (attempt + 1)
+                    logger.warning(
+                        "Rate limited (429), retrying in %ss...", wait,
+                    )
+                    time.sleep(wait)
+                    continue
+                # Exhausted retries; fall through to raise_for_status.
 
             # Check if server returned an API error in JSON body (don't retry these)
             try:
