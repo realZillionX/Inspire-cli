@@ -32,7 +32,7 @@
 - `tests/` contains pytest suites across CLI, bridge/tunnel, openapi, web session, notebook flows, and recent regressions (for example, `tests/test_cli_commands.py`, `tests/test_cli_smoke.py`, `tests/test_openapi_proxy_config.py`, `tests/test_resources_specs_command.py`, `tests/test_cpu_compute_group_fixes.py`).
 - `examples/` holds workflow YAML examples for Gitea/Forgejo usage.
 - `scripts/` is mostly ignored, but `scripts/bootstrap_inspire_env.sh` is intentionally tracked.
-- `docs/` includes `inspire.env.template`, OpenAPI reference notes (`启智 高性能计算/分布式训练/模型部署 OpenAPI 文档.md`), and `SKILL.md` (agent skill playbook); `README.md` is the user-facing command guide; `bin/inspire` is a repo-local wrapper.
+- `docs/` includes `inspire.env.template` and OpenAPI reference notes (`启智 高性能计算/分布式训练/模型部署 OpenAPI 文档.md`); `README.md` is the user-facing command guide; `bin/inspire` is a repo-local wrapper.
 
 ## Build, Test, and Development Commands
 - Prefer `uv` for all Python/CLI invocations (`uv run ...`, `uv tool run ...`); avoid system `python`/`pip`.
