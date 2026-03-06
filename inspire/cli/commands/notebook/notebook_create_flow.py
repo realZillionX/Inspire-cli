@@ -1029,16 +1029,19 @@ def _fetch_notebook_images(
         return None
 
     if image and not _find_image_match(images, image):
-        try:
-            public_images = browser_api_module.list_images(
-                workspace_id=workspace_id, source="SOURCE_PUBLIC", session=session
-            )
-            if public_images:
-                if not json_output:
-                    click.echo("Searching public images...")
-                images = images + public_images
-        except Exception:
-            pass
+        for source in ("SOURCE_PUBLIC", "SOURCE_PRIVATE"):
+            try:
+                extra_images = browser_api_module.list_images(
+                    workspace_id=workspace_id, source=source, session=session
+                )
+                if extra_images:
+                    if not json_output:
+                        click.echo(f"Searching {source.lower().replace('source_', '')} images...")
+                    images = images + extra_images
+                    if _find_image_match(images, image):
+                        break
+            except Exception:
+                pass
 
     if images:
         return images

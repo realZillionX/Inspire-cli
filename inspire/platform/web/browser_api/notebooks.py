@@ -127,6 +127,17 @@ def list_images(
                 "registry_hint": {"workspace_id": workspace_id},
             },
         }
+    elif source == "SOURCE_PRIVATE":
+        # Personal-visible images require private visibility across private/public sources.
+        body = {
+            "page": 0,
+            "page_size": -1,
+            "filter": {
+                "source_list": ["SOURCE_PRIVATE", "SOURCE_PUBLIC"],
+                "visibility": "VISIBILITY_PRIVATE",
+                "registry_hint": {"workspace_id": workspace_id},
+            },
+        }
     else:
         body = {
             "page": 0,
