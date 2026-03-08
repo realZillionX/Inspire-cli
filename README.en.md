@@ -2,7 +2,7 @@
 
 # Inspire CLI
 
-Command-line interface for the Inspire HPC training platform.
+Command-line interface for the Inspire HPC training platform. Supports notebook instance management, distributed training job submission, code sync, SSH tunneling, image management, and more.
 
 > 📖 **Full operational guide:** [Inspire Skill - Platform Operations Manual](https://fudan-nlp.feishu.cn/wiki/D2RXwnZcQiUQadkadJgcC1aEnLh) (Feishu, team access required)
 
@@ -23,61 +23,132 @@ uv tool install -e .
 inspire --help
 ```
 
+---
+
 ## Quick Start
 
-### 1. Auto-discover your platform
+### 1. Auto-discover platform resources
 
 ```bash
-inspire init --discover -u YOUR_USERNAME --base-url https://your-platform.com
+inspire init --discover -u <username> --base-url https://qz.sii.edu.cn
 ```
 
-This opens a browser to log in, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. Writes both global (`~/.config/inspire/config.toml`) and project (`.inspire/config.toml`) configs.
+This opens a browser for CAS Web SSO login, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. Writes both global config (`~/.config/inspire/config.toml`) and project config (`.inspire/config.toml`).
 
-Set your password as an env var to avoid repeated prompts:
+Set password as an env var to avoid repeated prompts:
+
 ```bash
 export INSPIRE_PASSWORD="your_password"
 ```
 
-### 2. Verify
+### 2. Verify configuration
 
 ```bash
-inspire config show    # Check all values resolved
-inspire config check   # Validate API auth
+inspire config show    # View all config values and their sources
+inspire config check   # Validate API authentication
 ```
 
 ### 3. Start using
 
 ```bash
-inspire resources list          # View GPU availability
-inspire notebook create --name dev --resource 4xCPU --wait
-inspire notebook ssh <id>       # SSH into notebook (auto-installs tunnel)
+inspire resources list                          # View GPU availability
+inspire notebook create --name dev -r 4CPU --wait  # Create a CPU instance
+inspire notebook ssh <id>                       # SSH into instance (auto-establishes tunnel)
 ```
 
-## Commands
+---
 
-| Command                                     | Description                                             |
-| ------------------------------------------- | ------------------------------------------------------- |
-| `inspire job create`                        | Submit a training job                                   |
-| `inspire job status/logs/list`              | Monitor and manage jobs                                 |
-| `inspire job stop/wait`                     | Stop or wait for a job                                  |
-| `inspire run "<cmd>"`                       | Quick job with auto resource selection                  |
-| `inspire sync`                              | Sync code to shared filesystem (via SSH tunnel)         |
-| `inspire bridge exec "<cmd>"`               | Run command on Bridge runner                            |
-| `inspire bridge ssh [--bridge <name>]`      | Interactive SSH shell to a Bridge profile               |
-| `inspire bridge scp <source> <destination>` | Upload/download files via Bridge tunnel                 |
-| `inspire notebook list/create`              | List or create notebook instances                       |
-| `inspire notebook start/stop`               | Start or stop a notebook                                |
-| `inspire notebook ssh <id>`                 | SSH into notebook (sets up tunnel)                      |
-| `inspire notebook top`                      | Show GPU utilization/memory for tunnel-backed notebooks |
-| `inspire image list/detail`                 | Browse Docker images                                    |
-| `inspire image save/register`               | Save or register custom images                          |
-| `inspire tunnel add/list/status`            | Manage SSH tunnels to Bridge                            |
-| `inspire tunnel ssh-config`                 | Generate SSH config for direct access                   |
-| `inspire project list`                      | View projects and GPU quota                             |
-| `inspire resources list/nodes`              | View GPU availability                                   |
-| `inspire config show/check`                 | Inspect and validate configuration                      |
-| `inspire init`                              | Generate starter config from env vars                   |
-| `inspire init --discover`                   | Auto-discover projects, workspaces, compute groups      |
+## Command Reference
+
+### Configuration & Initialization
+
+| Command                   | Description                                             |
+| ------------------------- | ------------------------------------------------------- |
+| `inspire init --discover` | Auto-discover projects, workspaces, compute groups      |
+| `inspire init`            | Generate config from env vars (template / smart mode)   |
+| `inspire config show`     | View merged config with value sources                   |
+| `inspire config check`    | Validate config + API auth status                       |
+| `inspire config env`      | Generate config template (`.env` format, with comments) |
+
+### Notebook Instance Management
+
+| Command                                      | Description                                                        |
+| -------------------------------------------- | ------------------------------------------------------------------ |
+| `inspire notebook list`                      | List instances in current workspace (add `-A` for all workspaces)  |
+| `inspire notebook create`                    | Create instance (`--workspace`, `--resource`, `--image`, `--wait`) |
+| `inspire notebook status <id>`               | View instance details                                              |
+| `inspire notebook start/stop <id>`           | Start / stop instance                                              |
+| `inspire notebook ssh <id>`                  | SSH into instance (auto-installs rtunnel + establishes tunnel)     |
+| `inspire notebook ssh <id> --save-as <name>` | SSH and save as Bridge Profile                                     |
+| `inspire notebook top`                       | Show GPU utilization for all tunneled instances (`--watch`)        |
+
+### Training Jobs
+
+| Command                    | Description                                              |
+| -------------------------- | -------------------------------------------------------- |
+| `inspire job create`       | Submit distributed training job (fine-grained control)   |
+| `inspire run "<cmd>"`      | Quick submit (auto resource selection, `--sync --watch`) |
+| `inspire job list`         | List locally cached jobs                                 |
+| `inspire job status <id>`  | Query job status                                         |
+| `inspire job logs <id>`    | View job logs (`--tail`, `--follow`, `--head`)           |
+| `inspire job wait <id>`    | Block until job finishes                                 |
+| `inspire job stop <id>`    | Stop a job                                               |
+| `inspire job update`       | Refresh cached active job statuses                       |
+| `inspire job command <id>` | View the submitted command                               |
+
+### HPC Jobs
+
+| Command                   | Description            |
+| ------------------------- | ---------------------- |
+| `inspire hpc create`      | Create HPC job (Slurm) |
+| `inspire hpc list`        | List HPC jobs          |
+| `inspire hpc status <id>` | View HPC job details   |
+| `inspire hpc stop <id>`   | Stop HPC job           |
+
+> **Note:** `hpc create`'s `--spec-id` must use `quota_id`. Obtain via `inspire resources specs` (output includes `quota_id`) or from `inspire --json hpc status <job_id>`. `--image` must be a full docker address.
+
+### Image Management
+
+| Command                            | Description                                                     |
+| ---------------------------------- | --------------------------------------------------------------- |
+| `inspire image list`               | Browse images (`--source private/public/official/all`)          |
+| `inspire image detail <id>`        | View image details                                              |
+| `inspire image save <notebook_id>` | Save image from a running instance                              |
+| `inspire image register`           | Register external image (`--method address` or `--method push`) |
+| `inspire image delete <id>`        | Delete image                                                    |
+| `inspire image set-default`        | Set default image (`--job` and/or `--notebook`)                 |
+
+### Code Sync & Remote Operations
+
+| Command                          | Description                                                          |
+| -------------------------------- | -------------------------------------------------------------------- |
+| `inspire sync`                   | Sync code to shared filesystem (SSH default, `--transport workflow`) |
+| `inspire bridge exec "<cmd>"`    | Execute command on remote `INSPIRE_TARGET_DIR`                       |
+| `inspire bridge ssh`             | Open interactive SSH shell                                           |
+| `inspire bridge scp <src> <dst>` | Upload/download files (`-r` recursive, `-d` download direction)      |
+
+### Tunnel Management
+
+| Command                               | Description                       |
+| ------------------------------------- | --------------------------------- |
+| `inspire tunnel add <name> <url>`     | Add tunnel Profile                |
+| `inspire tunnel list`                 | List all Profiles (with status)   |
+| `inspire tunnel status`               | Check all Bridge SSH connectivity |
+| `inspire tunnel test`                 | Test default Profile latency      |
+| `inspire tunnel ssh-config --install` | Write to `~/.ssh/config`          |
+| `inspire tunnel set-default <name>`   | Set default Profile               |
+| `inspire tunnel remove <name>`        | Remove Profile                    |
+
+### Resources & Projects
+
+| Command                   | Description                          |
+| ------------------------- | ------------------------------------ |
+| `inspire resources list`  | View GPU availability                |
+| `inspire resources nodes` | View node status                     |
+| `inspire resources specs` | Query compute group specs (`--json`) |
+| `inspire project list`    | View projects and quotas             |
+
+---
 
 ## Examples
 
@@ -85,137 +156,251 @@ inspire notebook ssh <id>       # SSH into notebook (auto-installs tunnel)
 # Submit a training job
 inspire job create --name "train-v1" --resource "4xH200" --command "bash train.sh"
 
-# Quick run with auto-selected resources, sync code and follow logs
+# Quick submit with auto code sync and log tracking
 inspire run "python train.py --epochs 100" --sync --watch
 
 # Sync code and verify
 inspire sync && inspire bridge exec "git log -1"
 
-# Set up SSH tunnel to a notebook
+# Set up SSH tunnel and save as Bridge Profile
 inspire notebook ssh <notebook-id> --save-as mybridge
 ssh mybridge
 
-# Check live GPU usage for all saved notebook tunnels
-inspire notebook top
-inspire notebook top --bridge mybridge --watch
+# Monitor GPU usage
+inspire notebook top --watch
 
-# Copy files through a configured bridge profile
+# Transfer files via Bridge
 inspire bridge scp ./model.py /tmp/model.py --bridge mybridge
 inspire bridge scp -d /tmp/checkpoints/ ./checkpoints/ -r --bridge mybridge
 
 # Check GPU availability and project quota
 inspire resources list
 inspire project list
+
+# Query compute group specs
+inspire resources specs --workspace cpu --group HPC-可上网区资源-2 --json
 ```
 
-## SSH/SCP Reliability Notes
-
-- There is no `inspire tunnel start` command. Create or refresh bridge profiles with `inspire notebook ssh <notebook-id> --save-as <name>` (or `inspire tunnel add` / `inspire tunnel update`), then validate with `inspire tunnel status`.
-- `inspire bridge ssh` and `inspire bridge scp` validate `--bridge` names before connectivity checks. If a profile is missing, run `inspire tunnel list`.
-- Saved notebook profiles now store the source notebook ID. Reusing `--save-as <name>` for a different notebook refreshes the tunnel instead of reusing stale tunnel state.
-- `inspire bridge ssh`, `inspire bridge exec`, and interactive `inspire notebook ssh` auto-rebuild/reconnect dropped tunnels for notebook-backed profiles, using `tunnel.retries` / `tunnel.retry_pause` as retry controls.
-- Non-notebook tunnel profiles (for example, manually added profiles without `notebook_id`) cannot be auto-rebuilt and still require manual tunnel recovery.
-- `inspire tunnel ssh-config` now writes shell-quoted `ProxyCommand` entries so proxy URLs with query parameters/tokens remain safe in `~/.ssh/config`.
+---
 
 ## Configuration
 
-The recommended way to configure is `inspire init --discover`, which auto-detects projects, workspaces, compute groups, and writes config files.
+### Layered Config Model
 
-Config files are loaded in order (later overrides earlier):
-1. Global: `~/.config/inspire/config.toml`
-2. Project: `./.inspire/config.toml`
-3. Environment variables
+Config is loaded in priority order (later overrides earlier):
 
-Account password lookup follows the same layered model:
-1. `[accounts."<username>"].password` from global config
-2. `[accounts."<username>"].password` from project config (overrides global for same username)
-3. `INSPIRE_PASSWORD` (fallback only if no account password was found)
+1. **Global config**: `~/.config/inspire/config.toml`
+2. **Project config**: `./.inspire/config.toml`
+3. **Environment variables**
 
-Run `inspire init --discover` to auto-configure, or `inspire config show` to inspect the merged result.
+Use `inspire init --discover` for auto-generation, or `inspire config show` to inspect the merged result.
 
-`inspire init` probe-only options are effective only with `--discover --probe-shared-path`:
-`--probe-limit`, `--probe-keep-notebooks`, `--probe-pubkey`/`--pubkey`, and `--probe-timeout`.
-Without that combination, they are accepted but ignored.
+### Multi-account Support
 
-Example `config.toml`:
+Configure passwords for different accounts in TOML:
+
+```toml
+[accounts."username_a"]
+password = "password_a"
+
+[accounts."username_b"]
+password = "password_b"
+```
+
+Lookup order: `[accounts."<username>"].password` (global → project) → `INSPIRE_PASSWORD` (fallback).
+
+### Example Config
 
 ```toml
 [auth]
 username = "your_username"
 
-[accounts."your_username"]
-# Optional: supports multi-account setups in global and/or project config
-password = "your_password"
-
 [api]
-base_url = "https://your-inspire-platform.com"
+base_url = "https://qz.sii.edu.cn"
+force_proxy = true
 
 [proxy]
-# Optional split-proxy routing:
+# Proxy config is optional. Skip this section if your network can reach *.sii.edu.cn directly.
 # requests_http = "http://127.0.0.1:8888"
 # requests_https = "http://127.0.0.1:8888"
 # playwright = "socks5://127.0.0.1:1080"
 # rtunnel = "socks5://127.0.0.1:1080"
 
-[bridge]
-# Timeout in seconds for `inspire bridge exec`
-action_timeout = 600
-
 [workspaces]
-# cpu = "ws-..."       # Default workspace (CPU jobs / notebooks)
-# gpu = "ws-..."       # GPU workspace (H100/H200 jobs)
-# internet = "ws-..."  # Internet-enabled GPU workspace (e.g. RTX 4090)
-# special = "ws-..."   # Custom alias (use with --workspace special)
+cpu = "ws-..."
+gpu = "ws-..."
+internet = "ws-..."
 
 [[compute_groups]]
 name = "H100 Cluster"
-id = "lcg-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+id = "lcg-..."
 gpu_type = "H100"
 
+[bridge]
+action_timeout = 600
+
 [ssh]
-# For GPU notebooks (H100/H200) without internet:
 # rtunnel_bin = "/inspire/shared/tools/rtunnel"
-# Option A: APT mirror (simpler — no pre-placed debs needed)
 # apt_mirror_url = "http://nexus.example.com/repository/ubuntu/"
-# Option B: Pre-placed dropbear debs
-# dropbear_deb_dir = "/inspire/shared/debs/dropbear"
 ```
 
-View current config:
-```bash
-inspire config show
-inspire config show --json
-inspire config check   # Validate config + API auth
-inspire --json config check
-inspire config check --json
-inspire init --json --template --project --force
+---
+
+## Proxy Configuration
+
+### Proxy is Optional
+
+If your network can reach `*.sii.edu.cn` directly (e.g., campus network), **no proxy configuration is needed** — the CLI connects directly.
+
+### When Proxy is Needed
+
+For accessing the Inspire platform via aTrust VPN (Docker-containerized):
+
+```toml
+[proxy]
+requests_http = "http://127.0.0.1:8888"    # aTrust HTTP proxy
+requests_https = "http://127.0.0.1:8888"
+playwright = "socks5://127.0.0.1:1080"     # aTrust SOCKS5 proxy
+rtunnel = "socks5://127.0.0.1:1080"
 ```
+
+Ports depend on your [Docker-aTrust](https://github.com/realZillionX/Docker-aTrust) container config (defaults: `8888` / `1080`).
+
+### Proxy Precedence
+
+1. Explicit env vars (`INSPIRE_*_PROXY`)
+2. TOML `[proxy]` values
+3. System `http_proxy` / `https_proxy`
+
+### Auto Split-routing
+
+When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8888`, Playwright and rtunnel automatically fall back to `socks5://127.0.0.1:1080`.
+
+---
 
 ## Environment Variables
 
-| Variable                        | Description                                   |
-| ------------------------------- | --------------------------------------------- |
-| `INSPIRE_USERNAME`              | Platform username                             |
-| `INSPIRE_PASSWORD`              | Platform password                             |
-| `INSPIRE_BASE_URL`              | API base URL                                  |
-| `INSPIRE_REQUESTS_HTTP_PROXY`   | HTTP proxy for requests/curl traffic          |
-| `INSPIRE_REQUESTS_HTTPS_PROXY`  | HTTPS proxy for requests/curl traffic         |
-| `INSPIRE_PLAYWRIGHT_PROXY`      | Proxy for Playwright browser automation       |
-| `INSPIRE_RTUNNEL_PROXY`         | Proxy for rtunnel/SSH ProxyCommand traffic    |
-| `INSPIRE_TARGET_DIR`            | Shared filesystem path                        |
-| `INSPIRE_WORKSPACE_ID`          | Default workspace ID                          |
-| `INSPIRE_WORKSPACE_CPU_ID`      | CPU workspace ID (default workspace)          |
-| `INSPIRE_WORKSPACE_GPU_ID`      | GPU workspace ID (H100/H200)                  |
-| `INSPIRE_WORKSPACE_INTERNET_ID` | Internet-enabled workspace ID (e.g. RTX 4090) |
-| `INSPIRE_PROJECT_ID`            | Default project ID                            |
-| `INSP_IMAGE`                    | Default Docker image                          |
-| `INSP_PRIORITY`                 | Job priority (1-10)                           |
+### Core
 
-Proxy precedence:
-1. Explicit env vars (`INSPIRE_*_PROXY`).
-2. Layered TOML values under `[proxy]`.
-3. System `http_proxy` / `https_proxy`.
+| Variable              | Description                  | Default     |
+| --------------------- | ---------------------------- | ----------- |
+| `INSPIRE_USERNAME`    | Platform username            | —           |
+| `INSPIRE_PASSWORD`    | Platform password (fallback) | —           |
+| `INSPIRE_BASE_URL`    | API base URL                 | From config |
+| `INSPIRE_FORCE_PROXY` | Force OpenAPI through proxy  | `false`     |
+| `INSPIRE_TARGET_DIR`  | Bridge shared directory path | —           |
 
-QiZhi split-routing auto-fallback is preserved: when request-side proxy resolves
-to `http://127.0.0.1:8888` under `.sii.edu.cn`, Playwright and rtunnel
-automatically use `socks5://127.0.0.1:1080`.
+### Proxy
+
+| Variable                       | Description                  |
+| ------------------------------ | ---------------------------- |
+| `INSPIRE_REQUESTS_HTTP_PROXY`  | HTTP proxy for OpenAPI       |
+| `INSPIRE_REQUESTS_HTTPS_PROXY` | HTTPS proxy for OpenAPI      |
+| `INSPIRE_PLAYWRIGHT_PROXY`     | Proxy for browser automation |
+| `INSPIRE_RTUNNEL_PROXY`        | Proxy for SSH tunneling      |
+
+### Workspaces & Projects
+
+| Variable                        | Description                |
+| ------------------------------- | -------------------------- |
+| `INSPIRE_PROJECT_ID`            | Default project ID         |
+| `INSPIRE_WORKSPACE_CPU_ID`      | CPU workspace ID           |
+| `INSPIRE_WORKSPACE_GPU_ID`      | GPU workspace ID           |
+| `INSPIRE_WORKSPACE_INTERNET_ID` | Internet-enabled workspace |
+
+### Jobs & Notebooks
+
+| Variable                    | Description               | Default  |
+| --------------------------- | ------------------------- | -------- |
+| `INSP_IMAGE`                | Default image             | —        |
+| `INSP_PRIORITY`             | Default priority (1-10)   | `6`      |
+| `INSPIRE_NOTEBOOK_RESOURCE` | Default notebook resource | `1xH200` |
+
+---
+
+## SSH / Tunnel Mechanics
+
+### Key Points
+
+- **There is no `inspire tunnel start` command.** Create or refresh Profiles with `inspire notebook ssh <id> --save-as <name>`.
+- **`allow_ssh=false` is the platform default.** SSH requires `sshd` + `rtunnel` pre-installed in the container — connection failure typically means the image lacks the SSH toolchain.
+- `notebook ssh` injects an install script via Jupyter WebSocket, but **this may silently fail** — reports "Sent setup script" while `/tmp/rtunnel` doesn't exist in the container. Manually install in the container's Web terminal if needed.
+- Images saved from instances with SSH installed will retain sshd — no need to reinstall.
+- `bridge exec` and `bridge ssh` auto-reconnect dropped tunnels for notebook-backed Profiles; `bridge scp` only checks availability without rebuilding.
+- rtunnel install script uses dynamic platform detection (`uname -s/-m`), independent of local host architecture.
+
+### Manual SSH Setup
+
+```bash
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq && apt-get install -y -qq openssh-server
+curl -fsSL "https://github.com/Sarfflow/rtunnel/releases/download/nightly/rtunnel-linux-amd64.tar.gz" \
+  -o /tmp/rtunnel.tgz && tar -xzf /tmp/rtunnel.tgz -C /tmp && chmod +x /tmp/rtunnel
+mkdir -p /run/sshd && ssh-keygen -A >/dev/null 2>&1
+/usr/sbin/sshd -p 22222 -o ListenAddress=127.0.0.1 -o PermitRootLogin=yes \
+  -o PasswordAuthentication=no -o PubkeyAuthentication=yes
+nohup /tmp/rtunnel 22222 31337 >/tmp/rtunnel-server.log 2>&1 &
+```
+
+---
+
+## HPC Job Notes
+
+- `--spec-id` must use `quota_id`. Obtain via `inspire resources specs` (output includes `quota_id`) or from `inspire --json hpc status <job_id>` → `slurm_cluster_spec.predef_quota_id`.
+- `--image` must be a full docker address (e.g., `docker.sii.shaipower.online/inspire-studio/<name>:<version>`).
+- `memory_per_cpu` is sent as a string with `G` suffix; `cpus_per_task` as a string — matching OpenAPI spec.
+- Built-in exponential backoff retry on `429 Too Many Requests`.
+
+---
+
+## Authentication
+
+Three independent auth chains (cannot substitute for each other):
+
+1. **OpenAPI**: Bearer Token (`POST /auth/token`) — for `job`/`run`/`hpc`/`config check`.
+2. **Web SSO**: Browser CAS Cookie Session — for `notebook`/`image`/`resources`/`project`.
+3. **Git Platform**: Gitea/GitHub Token — for `job logs`/`sync --transport workflow`.
+
+`config check` passing does not guarantee Web Session or Git Platform are functional.
+
+---
+
+## Exit Codes
+
+| Code | Meaning                    |
+| ---- | -------------------------- |
+| `0`  | Success                    |
+| `1`  | General error              |
+| `10` | Config error               |
+| `11` | Auth failure               |
+| `12` | Parameter validation error |
+| `13` | API error (incl. 429)      |
+| `14` | Timeout                    |
+| `15` | Log not found              |
+| `16` | Job not found              |
+
+---
+
+## Development & Contributing
+
+```bash
+# Set up dev environment
+uv venv .venv && uv pip install -e .
+
+# Run tests
+uv run python -m pytest tests/ -x -q
+
+# Format code
+uv tool run black .
+
+# Lint
+uv run ruff check inspire tests
+```
+
+Commit convention: use [Conventional Commits](https://www.conventionalcommits.org/) prefixes (`feat:`, `fix:`, `docs:`, `chore:`).
+
+---
+
+## License
+
+See [LICENSE](LICENSE) file.
