@@ -32,6 +32,7 @@ max_retries = 3
 retry_delay = 1.0
 
 [proxy]
+# Proxy is OPTIONAL. Leave commented if your network can reach *.sii.edu.cn directly.
 # requests_http = "http://127.0.0.1:8888"
 # requests_https = "http://127.0.0.1:8888"
 # playwright = "socks5://127.0.0.1:1080"

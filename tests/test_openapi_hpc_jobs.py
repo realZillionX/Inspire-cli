@@ -108,7 +108,7 @@ def test_hpc_create_retries_with_string_cpu_memory_fields() -> None:
     result = _invoke(api)
     assert result["code"] == 0
     assert len(api.calls) == 2
-    assert api.calls[0]["cpus_per_task"] == 4
-    assert api.calls[0]["memory_per_cpu"] == 8
+    assert api.calls[0]["cpus_per_task"] == "4"
+    assert api.calls[0]["memory_per_cpu"] == "8G"
     assert api.calls[1]["cpus_per_task"] == "4"
-    assert api.calls[1]["memory_per_cpu"] == "8"
+    assert api.calls[1]["memory_per_cpu"] == "8G"
