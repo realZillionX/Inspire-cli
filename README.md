@@ -4,7 +4,7 @@
 
 启智（Inspire）HPC 训练平台的命令行工具。支持 notebook 实例管理、分布式训练任务提交、代码同步、SSH 隧道、镜像管理等全流程操作。
 
-> 📖 **完整操作手册：** [Inspire Skill - 启智平台全流程操作手册](https://comyt.feishu.cn/wiki/PafdwhlCniYiMAkkRDAcVHw0nth)（飞书，需团队权限）
+> 📖 **完整操作手册：** [Inspire Skill - 启智平台全流程操作手册](https://fudan-nlp.feishu.cn/wiki/D2RXwnZcQiUQadkadJgcC1aEnLh)（飞书，需团队权限）
 
 ## 安装
 
