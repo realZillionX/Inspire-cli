@@ -1901,26 +1901,6 @@ def _get_or_create_dict_table(
     return section
 
 
-def _populate_project_defaults_from_config(
-    *,
-    defaults: dict[str, Any],
-    config: Config,
-) -> None:
-    if config.target_dir:
-        defaults.setdefault("target_dir", config.target_dir)
-    if config.log_pattern:
-        defaults.setdefault("log_pattern", config.log_pattern)
-    if config.job_image:
-        defaults.setdefault("image", config.job_image)
-    if config.notebook_image:
-        defaults.setdefault("notebook_image", config.notebook_image)
-    if config.notebook_resource:
-        defaults.setdefault("notebook_resource", config.notebook_resource)
-    if config.job_priority is not None:
-        defaults.setdefault("priority", int(config.job_priority))
-    if config.shm_size is not None:
-        defaults.setdefault("shm_size", int(config.shm_size))
-
 
 def _prompt_target_dir(
     *,
@@ -2011,10 +1991,9 @@ def _write_discovered_project_config(
         project_data=project_data,
     )
 
-    defaults = _get_or_create_dict_table(container=project_data, key="defaults")
-    _populate_project_defaults_from_config(defaults=defaults, config=config)
     if target_dir:
-        defaults["target_dir"] = target_dir
+        paths_section = _get_or_create_dict_table(container=project_data, key="paths")
+        paths_section["target_dir"] = target_dir
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
     project_path.write_text(_toml_dumps(project_data))
