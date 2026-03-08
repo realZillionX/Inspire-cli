@@ -38,6 +38,8 @@ _CATALOG_DROP_FIELDS = frozenset(
     }
 )
 
+_LEGACY_WORKSPACE_ALIASES = frozenset({"cpu", "gpu", "internet", "hpc", "whole_node"})
+
 
 class _ProbeDefaults(NamedTuple):
     ssh_runtime: object
@@ -1172,6 +1174,142 @@ def _get_existing_workspace_aliases(
     return dict(existing_workspaces)
 
 
+def _is_legacy_workspace_alias(value: str) -> bool:
+    return str(value or "").strip().lower() in _LEGACY_WORKSPACE_ALIASES
+
+
+def _workspace_name_map(
+    workspaces: dict[str, str],
+    *,
+    include_legacy: bool = False,
+) -> tuple[list[str], dict[str, str]]:
+    workspace_ids: list[str] = []
+    workspace_names: dict[str, str] = {}
+    for raw_name, raw_workspace_id in workspaces.items():
+        name = str(raw_name or "").strip()
+        workspace_id = str(raw_workspace_id or "").strip()
+        if not name or not workspace_id:
+            continue
+        if not include_legacy and _is_legacy_workspace_alias(name):
+            continue
+        if workspace_id not in workspace_names:
+            workspace_ids.append(workspace_id)
+            workspace_names[workspace_id] = name
+    return workspace_ids, workspace_names
+
+
+def _workspace_role_score(name: str, alias: str) -> int:
+    low = name.lower()
+    if alias == "cpu":
+        return 100 if "cpu" in low else 0
+    if alias == "internet":
+        if "上网" in name:
+            return 100
+        if "internet" in low:
+            return 90
+        if "net" in low:
+            return 80
+        return 0
+    if alias == "gpu":
+        if "cpu" in low or "上网" in name or "internet" in low:
+            return 0
+        if "分布式" in name or "训练" in name:
+            return 120
+        if "gpu" in low:
+            return 110
+        if "高性能" in name:
+            return 100
+        if "整节点" in name or "whole" in low or "node" in low:
+            return 90
+        if any(kw in low for kw in ("h100", "h200", "a100", "4090")):
+            return 80
+    return 0
+
+
+def _real_gpu_workspace_ids(compute_groups: list[dict[str, Any]] | None) -> set[str]:
+    workspace_ids: set[str] = set()
+    for cg in compute_groups or []:
+        gpu_type = str(cg.get("gpu_type") or "").strip()
+        if not gpu_type or gpu_type.upper() == "CPU":
+            continue
+        for raw_workspace_id in cg.get("workspace_ids") or []:
+            workspace_id = str(raw_workspace_id or "").strip()
+            if workspace_id:
+                workspace_ids.add(workspace_id)
+    return workspace_ids
+
+
+def _guess_workspace_id_from_map(
+    *,
+    workspaces: dict[str, str],
+    alias: str,
+) -> str | None:
+    workspace_ids, workspace_names = _workspace_name_map(workspaces)
+    guess_id = _guess_workspace_alias(alias, workspace_ids, workspace_names)
+    if guess_id:
+        return guess_id
+
+    for raw_name, raw_workspace_id in workspaces.items():
+        name = str(raw_name or "").strip()
+        workspace_id = str(raw_workspace_id or "").strip()
+        if name.lower() == alias and workspace_id:
+            return workspace_id
+    return None
+
+
+def _find_workspace_key_for_context(
+    *,
+    workspaces: dict[str, str],
+    alias: str,
+    compute_groups: list[dict[str, Any]] | None = None,
+) -> str | None:
+    gpu_workspace_ids = _real_gpu_workspace_ids(compute_groups) if alias == "gpu" else set()
+    best_name: str | None = None
+    best_score = 0
+    gpu_fallback_name: str | None = None
+    for raw_name, raw_workspace_id in workspaces.items():
+        name = str(raw_name or "").strip()
+        workspace_id = str(raw_workspace_id or "").strip()
+        if not name or not workspace_id or _is_legacy_workspace_alias(name):
+            continue
+        if gpu_workspace_ids and workspace_id not in gpu_workspace_ids:
+            continue
+        if gpu_workspace_ids and gpu_fallback_name is None:
+            gpu_fallback_name = name
+        score = _workspace_role_score(name, alias)
+        if score > best_score:
+            best_name = name
+            best_score = score
+    if best_name:
+        return best_name
+    if gpu_fallback_name:
+        return gpu_fallback_name
+
+    guess_id = _guess_workspace_id_from_map(workspaces=workspaces, alias=alias)
+    if guess_id:
+        for raw_name, raw_workspace_id in workspaces.items():
+            name = str(raw_name or "").strip()
+            workspace_id = str(raw_workspace_id or "").strip()
+            if workspace_id != guess_id or not name or _is_legacy_workspace_alias(name):
+                continue
+            return name
+
+    for raw_name in workspaces:
+        name = str(raw_name or "").strip()
+        if name.lower() == alias:
+            return name
+
+    actual_names = [
+        str(raw_name or "").strip()
+        for raw_name in workspaces
+        if str(raw_name or "").strip()
+        and not _is_legacy_workspace_alias(str(raw_name or "").strip())
+    ]
+    if len(actual_names) == 1:
+        return actual_names[0]
+    return None
+
+
 def _merge_workspace_aliases(
     *,
     config: Config,
@@ -1184,6 +1322,8 @@ def _merge_workspace_aliases(
             alias = str(raw_alias or "").strip()
             workspace_value = str(raw_workspace_id or "").strip()
             if not alias or not workspace_value:
+                continue
+            if not _is_legacy_workspace_alias(alias):
                 continue
             if force or alias not in merged_workspaces:
                 merged_workspaces[alias] = workspace_value
@@ -1199,6 +1339,17 @@ def _merge_workspace_aliases(
             continue
         if force or alias not in merged_workspaces:
             merged_workspaces[alias] = workspace_value
+
+    if isinstance(config_workspaces, dict):
+        for raw_alias, raw_workspace_id in config_workspaces.items():
+            alias = str(raw_alias or "").strip()
+            workspace_value = str(raw_workspace_id or "").strip()
+            if not alias or not workspace_value:
+                continue
+            if _is_legacy_workspace_alias(alias):
+                continue
+            if force or alias not in merged_workspaces:
+                merged_workspaces[alias] = workspace_value
 
     env_overrides = _discover_workspace_aliases()
     for alias, workspace_value in env_overrides.items():
@@ -1269,42 +1420,23 @@ def _prompt_workspace_aliases(
     discovered_workspace_ids: list[str],
     discovered_workspace_names: dict[str, str],
 ) -> None:
-    if len(discovered_workspace_ids) > 1 and not force:
-        click.echo()
-        click.echo(click.style("Multiple workspaces discovered:", bold=True))
-        for idx, ws_id in enumerate(discovered_workspace_ids, start=1):
-            ws_name = discovered_workspace_names.get(ws_id, "")
-            if ws_name:
-                click.echo(f"  {idx}. {ws_name} ({ws_id})")
-            else:
-                click.echo(f"  {idx}. {ws_id}")
+    added_named_workspace = False
+    for ws_id in discovered_workspace_ids:
+        workspace_value = str(ws_id or "").strip()
+        workspace_name = str(discovered_workspace_names.get(ws_id) or "").strip()
+        if not workspace_value or not workspace_name:
+            continue
+        added_named_workspace = True
+        if force or workspace_name not in merged_workspaces:
+            merged_workspaces[workspace_name] = workspace_value
 
-        for alias in ("cpu", "gpu", "internet"):
-            if alias in env_overrides:
-                continue
-
-            guess = _guess_workspace_alias(
-                alias, discovered_workspace_ids, discovered_workspace_names
-            )
-            default_idx = 1
-            for idx, ws_id in enumerate(discovered_workspace_ids, start=1):
-                if ws_id == (guess or workspace_id):
-                    default_idx = idx
-                    break
-
-            choice = click.prompt(
-                f"Workspace for '{alias}' alias",
-                type=int,
-                default=default_idx,
-                show_default=True,
-            )
-            if 1 <= choice <= len(discovered_workspace_ids):
-                merged_workspaces[alias] = discovered_workspace_ids[choice - 1]
-            else:
-                merged_workspaces.setdefault(alias, workspace_id)
+    if added_named_workspace:
         return
 
+    # Keep the legacy fallback only when discovery could not resolve workspace names.
     for alias in ("cpu", "gpu", "internet"):
+        if alias in env_overrides:
+            continue
         guess = _guess_workspace_alias(alias, discovered_workspace_ids, discovered_workspace_names)
         merged_workspaces.setdefault(alias, guess or workspace_id)
 
@@ -1463,31 +1595,29 @@ def _correct_workspace_aliases(
     alias.
     """
 
-    # Build workspace → set-of-gpu-types mapping.
-    ws_gpu_types: dict[str, set[str]] = {}
-    for cg in compute_groups:
-        gt = str(cg.get("gpu_type") or "").strip()
-        for ws_id in cg.get("workspace_ids") or []:
-            ws_gpu_types.setdefault(ws_id, set()).add(gt)
+    current_gpu_ws = str(merged_workspaces.get("gpu") or "").strip()
+    gpu_workspace_ids = _real_gpu_workspace_ids(compute_groups)
+    if current_gpu_ws and current_gpu_ws in gpu_workspace_ids:
+        return
 
-    def _has_real_gpu(ws_id: str) -> bool:
-        return any(t and t != "CPU" for t in ws_gpu_types.get(ws_id, set()))
+    preferred_gpu_ws: str | None = None
+    preferred_score = 0
+    fallback_gpu_ws: str | None = None
+    for raw_name, raw_workspace_id in merged_workspaces.items():
+        name = str(raw_name or "").strip()
+        workspace_id = str(raw_workspace_id or "").strip()
+        if not name or not workspace_id or workspace_id not in gpu_workspace_ids:
+            continue
+        if fallback_gpu_ws is None:
+            fallback_gpu_ws = workspace_id
+        score = 1000 if name.lower() == "gpu" else _workspace_role_score(name, "gpu")
+        if score > preferred_score:
+            preferred_gpu_ws = workspace_id
+            preferred_score = score
 
-    current_gpu_ws = merged_workspaces.get("gpu", "")
-    if current_gpu_ws and _has_real_gpu(current_gpu_ws):
-        return  # current assignment is fine
-
-    # Current gpu workspace has no real GPUs — find a better one.
-    best_ws: str | None = None
-    best_count = 0
-    for ws_id, types in ws_gpu_types.items():
-        real = sum(1 for t in types if t and t != "CPU")
-        if real > best_count:
-            best_ws = ws_id
-            best_count = real
-
-    if best_ws:
-        merged_workspaces["gpu"] = best_ws
+    corrected_gpu_ws = preferred_gpu_ws or fallback_gpu_ws
+    if corrected_gpu_ws and current_gpu_ws:
+        merged_workspaces["gpu"] = corrected_gpu_ws
 
 
 def _persist_compute_groups(
@@ -1586,7 +1716,9 @@ def _resolve_probe_defaults(
         raise SystemExit(1) from e
 
     probe_workspace_id = str(
-        getattr(config, "workspace_cpu_id", "") or merged_workspaces.get("cpu") or workspace_id
+        getattr(config, "workspace_cpu_id", "")
+        or _guess_workspace_id_from_map(workspaces=merged_workspaces, alias="cpu")
+        or workspace_id
     ).strip()
     if not probe_workspace_id:
         probe_workspace_id = workspace_id
@@ -1821,6 +1953,40 @@ def _prompt_target_dir(
     return result.strip() or None
 
 
+def _persist_context_defaults(
+    *,
+    context: dict[str, Any],
+    project_data: dict[str, Any],
+) -> None:
+    workspaces = project_data.get("workspaces")
+    if not isinstance(workspaces, dict):
+        workspaces = {}
+    compute_groups = project_data.get("compute_groups")
+    if not isinstance(compute_groups, list):
+        compute_groups = []
+
+    workspace_defaults = {
+        "workspace_cpu": _find_workspace_key_for_context(
+            workspaces=workspaces,
+            alias="cpu",
+            compute_groups=compute_groups,
+        ),
+        "workspace_gpu": _find_workspace_key_for_context(
+            workspaces=workspaces,
+            alias="gpu",
+            compute_groups=compute_groups,
+        ),
+        "workspace_internet": _find_workspace_key_for_context(
+            workspaces=workspaces,
+            alias="internet",
+            compute_groups=compute_groups,
+        ),
+    }
+    for field_name, workspace_name in workspace_defaults.items():
+        if workspace_name:
+            context[field_name] = workspace_name
+
+
 def _write_discovered_project_config(
     *,
     project_path: Path,
@@ -1838,10 +2004,11 @@ def _write_discovered_project_config(
         {
             "account": account_key,
             "project": selected_alias,
-            "workspace_cpu": "cpu",
-            "workspace_gpu": "gpu",
-            "workspace_internet": "internet",
         }
+    )
+    _persist_context_defaults(
+        context=context,
+        project_data=project_data,
     )
 
     defaults = _get_or_create_dict_table(container=project_data, key="defaults")
@@ -1979,8 +2146,12 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
     if not isinstance(existing_project_compute_groups, list):
         existing_project_compute_groups = []
 
-    known_workspace_ids = _extract_workspace_ids_from_compute_groups(existing_project_compute_groups)
-    missing_workspace_ids = sorted(ws_id for ws_id in all_ws_ids if ws_id not in known_workspace_ids)
+    known_workspace_ids = _extract_workspace_ids_from_compute_groups(
+        existing_project_compute_groups
+    )
+    missing_workspace_ids = sorted(
+        ws_id for ws_id in all_ws_ids if ws_id not in known_workspace_ids
+    )
 
     compute_groups: list[dict[str, Any]] = list(existing_project_compute_groups)
     if missing_workspace_ids:
