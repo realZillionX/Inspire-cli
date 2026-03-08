@@ -1,217 +1,404 @@
+中文 | [**English**](README.en.md)
+
 # Inspire CLI
 
-Command-line interface for the Inspire HPC training platform.
+启智（Inspire）HPC 训练平台的命令行工具。支持 notebook 实例管理、分布式训练任务提交、代码同步、SSH 隧道、镜像管理等全流程操作。
 
-## Installation
+## 安装
 
 ```bash
-# Via SSH (recommended)
+# 通过 SSH（推荐）
 uv tool install git+ssh://git@github.com/EmbodiedForge/Inspire-cli.git
 
-# Or via HTTPS
+# 或通过 HTTPS
 uv tool install git+https://github.com/EmbodiedForge/Inspire-cli.git
 ```
 
-### Local Development
+### 本地开发
 
 ```bash
 uv tool install -e .
 inspire --help
 ```
 
-## Quick Start
+---
 
-### 1. Auto-discover your platform
+## 快速开始
+
+### 1. 自动发现平台资源
 
 ```bash
-inspire init --discover -u YOUR_USERNAME --base-url https://your-platform.com
+inspire init --discover -u <用户名> --base-url https://qz.sii.edu.cn
 ```
 
-This opens a browser to log in, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. Writes both global (`~/.config/inspire/config.toml`) and project (`.inspire/config.toml`) configs.
+该命令会拉起浏览器完成 CAS Web SSO 登录，自动发现你的项目、工作空间、计算组、共享文件系统路径，并写入全局配置 `~/.config/inspire/config.toml` 和项目配置 `.inspire/config.toml`。
 
-Set your password as an env var to avoid repeated prompts:
+设置密码环境变量可避免重复输入：
+
 ```bash
 export INSPIRE_PASSWORD="your_password"
 ```
 
-### 2. Verify
+### 2. 验证配置
 
 ```bash
-inspire config show    # Check all values resolved
-inspire config check   # Validate API auth
+inspire config show    # 查看所有配置值及其来源
+inspire config check   # 验证 API 认证
 ```
 
-### 3. Start using
+### 3. 开始使用
 
 ```bash
-inspire resources list          # View GPU availability
-inspire notebook create --name dev --resource 4xCPU --wait
-inspire notebook ssh <id>       # SSH into notebook (auto-installs tunnel)
+inspire resources list                          # 查看 GPU 可用性
+inspire notebook create --name dev -r 4CPU --wait  # 创建 CPU 实例
+inspire notebook ssh <id>                       # SSH 连接到实例（自动建立隧道）
 ```
 
-## Commands
+---
 
-| Command | Description |
-|---------|-------------|
-| `inspire job create` | Submit a training job |
-| `inspire job status/logs/list` | Monitor and manage jobs |
-| `inspire job stop/wait` | Stop or wait for a job |
-| `inspire run "<cmd>"` | Quick job with auto resource selection |
-| `inspire sync` | Sync code to shared filesystem (via SSH tunnel) |
-| `inspire bridge exec "<cmd>"` | Run command on Bridge runner |
-| `inspire bridge ssh [--bridge <name>]` | Interactive SSH shell to a Bridge profile |
-| `inspire bridge scp <source> <destination>` | Upload/download files via Bridge tunnel |
-| `inspire notebook list/create` | List or create notebook instances |
-| `inspire notebook start/stop` | Start or stop a notebook |
-| `inspire notebook ssh <id>` | SSH into notebook (sets up tunnel) |
-| `inspire notebook top` | Show GPU utilization/memory for tunnel-backed notebooks |
-| `inspire image list/detail` | Browse Docker images |
-| `inspire image save/register` | Save or register custom images |
-| `inspire tunnel add/list/status` | Manage SSH tunnels to Bridge |
-| `inspire tunnel ssh-config` | Generate SSH config for direct access |
-| `inspire project list` | View projects and GPU quota |
-| `inspire resources list/nodes` | View GPU availability |
-| `inspire config show/check` | Inspect and validate configuration |
-| `inspire init` | Generate starter config from env vars |
-| `inspire init --discover` | Auto-discover projects, workspaces, compute groups |
+## 命令速查表
 
-## Examples
+### 配置与初始化
+
+| 命令                      | 说明                                          |
+| ------------------------- | --------------------------------------------- |
+| `inspire init --discover` | 自动发现项目、工作空间、计算组并写入配置      |
+| `inspire init`            | 从环境变量生成配置文件（模板模式 / 智能模式） |
+| `inspire config show`     | 查看合并后的配置及值来源                      |
+| `inspire config check`    | 验证配置 + API 认证状态                       |
+| `inspire config env`      | 按 schema 生成配置模板（`.env` 格式，含注释） |
+
+### Notebook 实例管理
+
+| 命令                                         | 说明                                                              |
+| -------------------------------------------- | ----------------------------------------------------------------- |
+| `inspire notebook list`                      | 列出当前工作空间实例（加 `-A` 跨所有工作空间）                    |
+| `inspire notebook create`                    | 创建实例（支持 `--workspace`, `--resource`, `--image`, `--wait`） |
+| `inspire notebook status <id>`               | 查看实例详情                                                      |
+| `inspire notebook start/stop <id>`           | 启动 / 停止实例                                                   |
+| `inspire notebook ssh <id>`                  | SSH 连接到实例（自动安装 rtunnel + 建立隧道）                     |
+| `inspire notebook ssh <id> --save-as <name>` | SSH 并保存为 Bridge Profile                                       |
+| `inspire notebook top`                       | 显示所有 tunnel 实例的 GPU 利用率（加 `--watch` 持续监控）        |
+
+### 训练任务
+
+| 命令                       | 说明                                                |
+| -------------------------- | --------------------------------------------------- |
+| `inspire job create`       | 提交分布式训练任务（精细控制）                      |
+| `inspire run "<cmd>"`      | 快速提交任务（自动选资源，支持 `--sync --watch`）   |
+| `inspire job list`         | 列出本地缓存的作业                                  |
+| `inspire job status <id>`  | 查询作业状态                                        |
+| `inspire job logs <id>`    | 查看作业日志（支持 `--tail`, `--follow`, `--head`） |
+| `inspire job wait <id>`    | 阻塞等待作业结束                                    |
+| `inspire job stop <id>`    | 停止作业                                            |
+| `inspire job update`       | 刷新缓存中活跃作业状态                              |
+| `inspire job command <id>` | 查看提交时的命令                                    |
+
+### HPC 任务
+
+| 命令                      | 说明                        |
+| ------------------------- | --------------------------- |
+| `inspire hpc create`      | 创建 HPC 任务（Slurm 链路） |
+| `inspire hpc list`        | 列出 HPC 任务               |
+| `inspire hpc status <id>` | 查看 HPC 任务详情           |
+| `inspire hpc stop <id>`   | 停止 HPC 任务               |
+
+> **注意：** `hpc create` 的 `--spec-id` 必须使用 `quota_id`。可通过 `inspire resources specs` 获取（输出中会标注 `quota_id`），或从已有 HPC 任务的 `inspire --json hpc status <job_id>` 中提取。`--image` 必须用完整 docker 地址。
+
+### 镜像管理
+
+| 命令                               | 说明                                                  |
+| ---------------------------------- | ----------------------------------------------------- |
+| `inspire image list`               | 浏览镜像（`--source private/public/official/all`）    |
+| `inspire image detail <id>`        | 查看镜像详情                                          |
+| `inspire image save <notebook_id>` | 从运行中的实例保存镜像                                |
+| `inspire image register`           | 注册外部镜像（`--method address` 或 `--method push`） |
+| `inspire image delete <id>`        | 删除镜像                                              |
+| `inspire image set-default`        | 设置默认镜像（`--job` 和/或 `--notebook`）            |
+
+### 代码同步与远程操作
+
+| 命令                             | 说明                                                            |
+| -------------------------------- | --------------------------------------------------------------- |
+| `inspire sync`                   | 同步代码到共享文件系统（默认 SSH，`--transport workflow` 切换） |
+| `inspire bridge exec "<cmd>"`    | 在远端 `INSPIRE_TARGET_DIR` 下执行命令                          |
+| `inspire bridge ssh`             | 打开交互式 SSH shell                                            |
+| `inspire bridge scp <src> <dst>` | 上传/下载文件（加 `-r` 递归，加 `-d` 下载方向）                 |
+
+### 隧道管理
+
+| 命令                                  | 说明                           |
+| ------------------------------------- | ------------------------------ |
+| `inspire tunnel add <name> <url>`     | 添加隧道 Profile               |
+| `inspire tunnel list`                 | 列出所有 Profile（含连通状态） |
+| `inspire tunnel status`               | 检查所有 Bridge SSH 连通性     |
+| `inspire tunnel test`                 | 测试默认 Profile 连接延迟      |
+| `inspire tunnel ssh-config --install` | 写入 `~/.ssh/config`           |
+| `inspire tunnel set-default <name>`   | 设默认 Profile                 |
+| `inspire tunnel remove <name>`        | 删除 Profile                   |
+
+### 资源与项目
+
+| 命令                      | 说明                            |
+| ------------------------- | ------------------------------- |
+| `inspire resources list`  | 查看 GPU 可用性                 |
+| `inspire resources nodes` | 查看节点状态                    |
+| `inspire resources specs` | 查询计算组规格（支持 `--json`） |
+| `inspire project list`    | 查看项目和配额                  |
+
+---
+
+## 使用示例
 
 ```bash
-# Submit a training job
+# 提交训练任务
 inspire job create --name "train-v1" --resource "4xH200" --command "bash train.sh"
 
-# Quick run with auto-selected resources, sync code and follow logs
+# 快速提交，自动同步代码并跟踪日志
 inspire run "python train.py --epochs 100" --sync --watch
 
-# Sync code and verify
+# 同步代码并验证
 inspire sync && inspire bridge exec "git log -1"
 
-# Set up SSH tunnel to a notebook
+# 建立 SSH 隧道并保存为 Bridge Profile
 inspire notebook ssh <notebook-id> --save-as mybridge
 ssh mybridge
 
-# Check live GPU usage for all saved notebook tunnels
-inspire notebook top
-inspire notebook top --bridge mybridge --watch
+# 监控 GPU 使用率
+inspire notebook top --watch
 
-# Copy files through a configured bridge profile
+# 通过 Bridge 传输文件
 inspire bridge scp ./model.py /tmp/model.py --bridge mybridge
 inspire bridge scp -d /tmp/checkpoints/ ./checkpoints/ -r --bridge mybridge
 
-# Check GPU availability and project quota
+# 查看 GPU 可用性和项目配额
 inspire resources list
 inspire project list
+
+# 查询计算组可用规格
+inspire resources specs --workspace cpu --group HPC-可上网区资源-2 --json
 ```
 
-## SSH/SCP Reliability Notes
+---
 
-- There is no `inspire tunnel start` command. Create or refresh bridge profiles with `inspire notebook ssh <notebook-id> --save-as <name>` (or `inspire tunnel add` / `inspire tunnel update`), then validate with `inspire tunnel status`.
-- `inspire bridge ssh` and `inspire bridge scp` validate `--bridge` names before connectivity checks. If a profile is missing, run `inspire tunnel list`.
-- Saved notebook profiles now store the source notebook ID. Reusing `--save-as <name>` for a different notebook refreshes the tunnel instead of reusing stale tunnel state.
-- `inspire bridge ssh`, `inspire bridge exec`, and interactive `inspire notebook ssh` auto-rebuild/reconnect dropped tunnels for notebook-backed profiles, using `tunnel.retries` / `tunnel.retry_pause` as retry controls.
-- Non-notebook tunnel profiles (for example, manually added profiles without `notebook_id`) cannot be auto-rebuilt and still require manual tunnel recovery.
-- `inspire tunnel ssh-config` now writes shell-quoted `ProxyCommand` entries so proxy URLs with query parameters/tokens remain safe in `~/.ssh/config`.
+## 配置
 
-## Configuration
+### 分层配置模型
 
-The recommended way to configure is `inspire init --discover`, which auto-detects projects, workspaces, compute groups, and writes config files.
+配置按以下优先级加载（后者覆盖前者）：
 
-Config files are loaded in order (later overrides earlier):
-1. Global: `~/.config/inspire/config.toml`
-2. Project: `./.inspire/config.toml`
-3. Environment variables
+1. **全局配置**：`~/.config/inspire/config.toml`
+2. **项目配置**：`./.inspire/config.toml`
+3. **环境变量**
 
-Account password lookup follows the same layered model:
-1. `[accounts."<username>"].password` from global config
-2. `[accounts."<username>"].password` from project config (overrides global for same username)
-3. `INSPIRE_PASSWORD` (fallback only if no account password was found)
+推荐使用 `inspire init --discover` 自动生成配置，或 `inspire config show` 查看合并结果。
 
-Run `inspire init --discover` to auto-configure, or `inspire config show` to inspect the merged result.
+### 多账号支持
 
-`inspire init` probe-only options are effective only with `--discover --probe-shared-path`:
-`--probe-limit`, `--probe-keep-notebooks`, `--probe-pubkey`/`--pubkey`, and `--probe-timeout`.
-Without that combination, they are accepted but ignored.
+在 TOML 中为不同账号配置密码：
 
-Example `config.toml`:
+```toml
+[accounts."username_a"]
+password = "password_a"
+
+[accounts."username_b"]
+password = "password_b"
+```
+
+密码查找顺序：`[accounts."<username>"].password`（global → project）→ `INSPIRE_PASSWORD`（兜底）。
+
+### 配置文件示例
 
 ```toml
 [auth]
 username = "your_username"
 
-[accounts."your_username"]
-# Optional: supports multi-account setups in global and/or project config
-password = "your_password"
-
 [api]
-base_url = "https://your-inspire-platform.com"
+base_url = "https://qz.sii.edu.cn"
+force_proxy = true
 
 [proxy]
-# Optional split-proxy routing:
+# 代理配置是可选的。如果本地网络可直连 *.sii.edu.cn，无需配置。
 # requests_http = "http://127.0.0.1:8888"
 # requests_https = "http://127.0.0.1:8888"
 # playwright = "socks5://127.0.0.1:1080"
 # rtunnel = "socks5://127.0.0.1:1080"
 
-[bridge]
-# Timeout in seconds for `inspire bridge exec`
-action_timeout = 600
-
 [workspaces]
-# cpu = "ws-..."       # Default workspace (CPU jobs / notebooks)
-# gpu = "ws-..."       # GPU workspace (H100/H200 jobs)
-# internet = "ws-..."  # Internet-enabled GPU workspace (e.g. RTX 4090)
-# special = "ws-..."   # Custom alias (use with --workspace special)
+cpu = "ws-..."
+gpu = "ws-..."
+internet = "ws-..."
 
 [[compute_groups]]
 name = "H100 Cluster"
-id = "lcg-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+id = "lcg-..."
 gpu_type = "H100"
 
+[bridge]
+action_timeout = 600
+
 [ssh]
-# For GPU notebooks (H100/H200) without internet:
 # rtunnel_bin = "/inspire/shared/tools/rtunnel"
-# Option A: APT mirror (simpler — no pre-placed debs needed)
 # apt_mirror_url = "http://nexus.example.com/repository/ubuntu/"
-# Option B: Pre-placed dropbear debs
-# dropbear_deb_dir = "/inspire/shared/debs/dropbear"
 ```
 
-View current config:
+---
+
+## 代理配置
+
+### 代理是可选的
+
+如果你的网络可以直连 `*.sii.edu.cn`（例如校园网内），**无需配置任何代理**，CLI 会直连目标。
+
+### 需要代理时
+
+适用于通过 aTrust VPN（Docker 容器化）访问启智平台的场景：
+
+```toml
+[proxy]
+requests_http = "http://127.0.0.1:8888"    # aTrust HTTP 代理
+requests_https = "http://127.0.0.1:8888"
+playwright = "socks5://127.0.0.1:1080"     # aTrust SOCKS5 代理
+rtunnel = "socks5://127.0.0.1:1080"
+```
+
+端口号取决于你的 [Docker-aTrust](https://github.com/realZillionX/Docker-aTrust) 容器配置（默认 `8888` / `1080`）。
+
+### 代理优先级
+
+1. 显式环境变量（`INSPIRE_*_PROXY`）
+2. TOML `[proxy]` 配置
+3. 系统 `http_proxy` / `https_proxy`
+
+### 自动分流
+
+当 `base_url` 属于 `.sii.edu.cn` 且 requests 代理为 `http://127.0.0.1:8888` 时，Playwright 和 rtunnel 会自动降级到 `socks5://127.0.0.1:1080`。
+
+---
+
+## 环境变量参考
+
+### 核心配置
+
+| 变量                  | 说明                    | 默认值     |
+| --------------------- | ----------------------- | ---------- |
+| `INSPIRE_USERNAME`    | 平台用户名              | —          |
+| `INSPIRE_PASSWORD`    | 平台密码（兜底）        | —          |
+| `INSPIRE_BASE_URL`    | API 基地址              | 由配置决定 |
+| `INSPIRE_FORCE_PROXY` | 强制 OpenAPI 走代理     | `false`    |
+| `INSPIRE_TARGET_DIR`  | Bridge 共享目录目标路径 | —          |
+
+### 代理
+
+| 变量                           | 说明                        |
+| ------------------------------ | --------------------------- |
+| `INSPIRE_REQUESTS_HTTP_PROXY`  | OpenAPI/requests HTTP 代理  |
+| `INSPIRE_REQUESTS_HTTPS_PROXY` | OpenAPI/requests HTTPS 代理 |
+| `INSPIRE_PLAYWRIGHT_PROXY`     | Playwright 浏览器代理       |
+| `INSPIRE_RTUNNEL_PROXY`        | rtunnel SSH 代理            |
+
+### 工作空间与项目
+
+| 变量                            | 说明              |
+| ------------------------------- | ----------------- |
+| `INSPIRE_PROJECT_ID`            | 默认项目 ID       |
+| `INSPIRE_WORKSPACE_CPU_ID`      | CPU 工作空间 ID   |
+| `INSPIRE_WORKSPACE_GPU_ID`      | GPU 工作空间 ID   |
+| `INSPIRE_WORKSPACE_INTERNET_ID` | 可上网工作空间 ID |
+
+### 作业与 Notebook
+
+| 变量                        | 说明                   | 默认值   |
+| --------------------------- | ---------------------- | -------- |
+| `INSP_IMAGE`                | 默认镜像               | —        |
+| `INSP_PRIORITY`             | 默认优先级（1-10）     | `6`      |
+| `INSPIRE_NOTEBOOK_RESOURCE` | 默认 Notebook 资源规格 | `1xH200` |
+
+---
+
+## SSH / 隧道机制
+
+### 关键要点
+
+- **没有 `inspire tunnel start` 命令。** 通过 `inspire notebook ssh <id> --save-as <name>` 创建或刷新 Profile。
+- **`allow_ssh=false` 是平台默认状态。** SSH 需要容器内预装 `sshd` + `rtunnel`——如果连接失败，通常意味着镜像未包含 SSH 工具链。
+- `notebook ssh` 会通过 Jupyter WebSocket 注入安装脚本，但**此机制可能静默失败**——报 "Sent setup script" 但容器内无 `/tmp/rtunnel`。此时需在容器 Web 终端手动安装。
+- 从已安装 SSH 工具链的实例保存的镜像会保留 sshd，后续实例无需重复安装。
+- `bridge exec` 和 `bridge ssh` 在 notebook-backed Profile 上会自动重连断开的隧道；`bridge scp` 仅检查隧道可用性，不会自动重建。
+- rtunnel 安装脚本使用动态平台检测（`uname -s/-m`），不依赖本地主机架构。
+
+### SSH 初始化（手动安装）
+
 ```bash
-inspire config show
-inspire config show --json
-inspire config check   # Validate config + API auth
-inspire --json config check
-inspire config check --json
-inspire init --json --template --project --force
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq && apt-get install -y -qq openssh-server
+curl -fsSL "https://github.com/Sarfflow/rtunnel/releases/download/nightly/rtunnel-linux-amd64.tar.gz" \
+  -o /tmp/rtunnel.tgz && tar -xzf /tmp/rtunnel.tgz -C /tmp && chmod +x /tmp/rtunnel
+mkdir -p /run/sshd && ssh-keygen -A >/dev/null 2>&1
+/usr/sbin/sshd -p 22222 -o ListenAddress=127.0.0.1 -o PermitRootLogin=yes \
+  -o PasswordAuthentication=no -o PubkeyAuthentication=yes
+nohup /tmp/rtunnel 22222 31337 >/tmp/rtunnel-server.log 2>&1 &
 ```
 
-## Environment Variables
+---
 
-| Variable | Description |
-|----------|-------------|
-| `INSPIRE_USERNAME` | Platform username |
-| `INSPIRE_PASSWORD` | Platform password |
-| `INSPIRE_BASE_URL` | API base URL |
-| `INSPIRE_REQUESTS_HTTP_PROXY` | HTTP proxy for requests/curl traffic |
-| `INSPIRE_REQUESTS_HTTPS_PROXY` | HTTPS proxy for requests/curl traffic |
-| `INSPIRE_PLAYWRIGHT_PROXY` | Proxy for Playwright browser automation |
-| `INSPIRE_RTUNNEL_PROXY` | Proxy for rtunnel/SSH ProxyCommand traffic |
-| `INSPIRE_TARGET_DIR` | Shared filesystem path |
-| `INSPIRE_WORKSPACE_ID` | Default workspace ID |
-| `INSPIRE_WORKSPACE_CPU_ID` | CPU workspace ID (default workspace) |
-| `INSPIRE_WORKSPACE_GPU_ID` | GPU workspace ID (H100/H200) |
-| `INSPIRE_WORKSPACE_INTERNET_ID` | Internet-enabled workspace ID (e.g. RTX 4090) |
-| `INSPIRE_PROJECT_ID` | Default project ID |
-| `INSP_IMAGE` | Default Docker image |
-| `INSP_PRIORITY` | Job priority (1-10) |
+## HPC 任务注意事项
 
-Proxy precedence:
-1. Explicit env vars (`INSPIRE_*_PROXY`).
-2. Layered TOML values under `[proxy]`.
-3. System `http_proxy` / `https_proxy`.
+- `--spec-id` 必须使用 `quota_id`。可通过 `inspire resources specs`（输出中包含 `quota_id`）或从已有 HPC 任务的 `inspire --json hpc status <job_id>` → `slurm_cluster_spec.predef_quota_id` 获取。
+- `--image` 必须用完整 docker 地址（如 `docker.sii.shaipower.online/inspire-studio/<name>:<version>`）。
+- `memory_per_cpu` 发送为带 `G` 后缀的字符串，`cpus_per_task` 发送为字符串，匹配 OpenAPI 规范。
+- 遇到 `429 Too Many Requests` 时 CLI 已内置指数退避重试。
 
-QiZhi split-routing auto-fallback is preserved: when request-side proxy resolves
-to `http://127.0.0.1:8888` under `.sii.edu.cn`, Playwright and rtunnel
-automatically use `socks5://127.0.0.1:1080`.
+---
+
+## 认证链路
+
+三条认证链路独立，不可互相代证：
+
+1. **OpenAPI**：Bearer Token（`POST /auth/token`），用于 `job`/`run`/`hpc`/`config check`。
+2. **Web SSO**：浏览器 CAS Cookie Session，用于 `notebook`/`image`/`resources`/`project`。
+3. **Git Platform**：Gitea/GitHub Token，用于 `job logs`/`sync --transport workflow`。
+
+`config check` 通过不代表 Web Session 或 Git Platform 链路可用。
+
+---
+
+## 退出码
+
+| 退出码 | 含义                    |
+| ------ | ----------------------- |
+| `0`    | 成功                    |
+| `1`    | 通用错误                |
+| `10`   | 配置错误                |
+| `11`   | 认证失败                |
+| `12`   | 参数校验错误            |
+| `13`   | API 错误（含 429 限流） |
+| `14`   | 超时                    |
+| `15`   | 日志不存在              |
+| `16`   | 作业不存在              |
+
+---
+
+## 开发与贡献
+
+```bash
+# 创建开发环境
+uv venv .venv && uv pip install -e .
+
+# 运行测试
+uv run python -m pytest tests/ -x -q
+
+# 代码格式化
+uv tool run black .
+
+# Lint 检查
+uv run ruff check inspire tests
+```
+
+提交规范：使用 [Conventional Commits](https://www.conventionalcommits.org/) 前缀（`feat:`, `fix:`, `docs:`, `chore:`）。
+
+---
+
+## 许可证
+
+详见 [LICENSE](LICENSE) 文件。
