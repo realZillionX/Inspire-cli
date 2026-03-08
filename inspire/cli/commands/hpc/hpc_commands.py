@@ -17,6 +17,7 @@ from inspire.cli.formatters import human_formatter, json_formatter
 from inspire.cli.utils.auth import AuthManager, AuthenticationError
 from inspire.cli.utils.errors import exit_with_error as _handle_error
 from inspire.config import Config, ConfigError
+from inspire.config.workspaces import select_workspace_id
 from inspire.platform.openapi import InspireAPIError
 from inspire.platform.web import browser_api as browser_api_module
 from inspire.platform.web.session import SessionExpiredError, get_web_session
@@ -38,29 +39,6 @@ def _resolve_project_id(config: Config, requested: Optional[str]) -> str:
         return config.job_project_id
     raise ConfigError(
         "Missing project_id. Set --project or configure [job].project_id / INSPIRE_PROJECT_ID."
-    )
-
-
-def _resolve_workspace_id(
-    config: Config,
-    *,
-    workspace: Optional[str],
-    workspace_id_override: Optional[str],
-) -> str:
-    """Resolve workspace alias/name/id to workspace_id."""
-    if workspace_id_override:
-        return workspace_id_override
-    if workspace:
-        if workspace.startswith("ws-"):
-            return workspace
-        if workspace in config.workspaces:
-            return config.workspaces[workspace]
-        return workspace
-
-    if config.job_workspace_id:
-        return config.job_workspace_id
-    raise ConfigError(
-        "Missing workspace_id. Set --workspace-id/--workspace or configure [job].workspace_id."
     )
 
 
@@ -119,10 +97,10 @@ def list_hpc(
         config, _ = Config.from_files_and_env(require_credentials=False)
         resolved_workspace_id = None
         if workspace is not None or workspace_id_override is not None:
-            resolved_workspace_id = _resolve_workspace_id(
+            resolved_workspace_id = select_workspace_id(
                 config,
-                workspace=workspace,
-                workspace_id_override=workspace_id_override,
+                explicit_workspace_name=workspace,
+                explicit_workspace_id=workspace_id_override,
             )
 
         session = get_web_session()
@@ -226,11 +204,15 @@ def create_hpc(
         api = AuthManager.get_api(config)
 
         resolved_project_id = _resolve_project_id(config, project)
-        resolved_workspace_id = _resolve_workspace_id(
+        resolved_workspace_id = select_workspace_id(
             config,
-            workspace=workspace,
-            workspace_id_override=workspace_id_override,
+            explicit_workspace_name=workspace,
+            explicit_workspace_id=workspace_id_override,
         )
+        if resolved_workspace_id is None:
+            raise ConfigError(
+                "Missing workspace_id. Set --workspace-id/--workspace or configure [job].workspace_id."
+            )
         final_priority = priority if priority is not None else config.job_priority
         final_image = image if image is not None else config.job_image
         if not final_image:

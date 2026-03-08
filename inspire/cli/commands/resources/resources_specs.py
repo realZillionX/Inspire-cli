@@ -16,27 +16,9 @@ from inspire.cli.context import (
 from inspire.cli.formatters import json_formatter
 from inspire.cli.utils.errors import exit_with_error as _handle_error
 from inspire.config import Config, ConfigError
+from inspire.config.workspaces import select_workspace_id
 from inspire.platform.web import browser_api as browser_api_module
 from inspire.platform.web.session import SessionExpiredError, get_web_session
-
-
-def _resolve_workspace_id(
-    config: Config,
-    *,
-    workspace: Optional[str],
-    workspace_id_override: Optional[str],
-) -> Optional[str]:
-    if workspace_id_override:
-        return workspace_id_override
-    if workspace:
-        if workspace.startswith("ws-"):
-            return workspace
-        if workspace in config.workspaces:
-            return config.workspaces[workspace]
-        return workspace
-    if config.job_workspace_id:
-        return config.job_workspace_id
-    return None
 
 
 def _group_id(group: dict) -> str:
@@ -60,10 +42,7 @@ def _extract_gpu_type(price: dict) -> str:
 
 def _extract_memory_gib(price: dict) -> int:
     value = (
-        price.get("memory_size_gib")
-        or price.get("memory_size")
-        or price.get("memory_size_gb")
-        or 0
+        price.get("memory_size_gib") or price.get("memory_size") or price.get("memory_size_gb") or 0
     )
     try:
         return int(value)
@@ -98,10 +77,10 @@ def list_specs(
     ctx.json_output = bool(ctx.json_output or json_output_local)
     try:
         config, _ = Config.from_files_and_env(require_credentials=False, require_target_dir=False)
-        resolved_workspace_id = _resolve_workspace_id(
+        resolved_workspace_id = select_workspace_id(
             config,
-            workspace=workspace,
-            workspace_id_override=workspace_id_override,
+            explicit_workspace_name=workspace,
+            explicit_workspace_id=workspace_id_override,
         )
         session = get_web_session()
         workspace_id = resolved_workspace_id or session.workspace_id

@@ -34,13 +34,13 @@ def patch_hpc_config_and_auth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
         password="pass",
         base_url="https://example.invalid",
         job_project_id="project-default",
-        job_workspace_id="ws-default",
+        job_workspace_id="ws-00000000-0000-0000-0000-000000000001",
         job_image="registry.local/hpc:latest",
         job_cache_path=str(tmp_path / "jobs.json"),
         log_cache_dir=str(tmp_path / "logs"),
     )
     config.projects = {"alias-project": "project-alias"}
-    config.workspaces = {"cpu-room": "ws-cpu-room"}
+    config.workspaces = {"cpu-room": "ws-00000000-0000-0000-0000-000000000002"}
 
     def fake_from_files_and_env(
         cls,
@@ -107,7 +107,7 @@ def test_hpc_create_json_uses_alias_resolution(
 
     call = api.calls["create_hpc_job"]
     assert call["project_id"] == "project-alias"
-    assert call["workspace_id"] == "ws-cpu-room"
+    assert call["workspace_id"] == "ws-00000000-0000-0000-0000-000000000002"
     assert call["image"] == "registry.local/hpc:latest"
     assert call["cpus_per_task"] == 32
     assert call["memory_per_cpu"] == 8
@@ -178,7 +178,7 @@ def test_hpc_list_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     assert payload["success"] is True
     assert payload["data"]["total"] == 1
     assert payload["data"]["jobs"][0]["job_id"] == "hpc-job-001"
-    assert payload["data"]["jobs"][0]["workspace_id"] == "ws-cpu-room"
+    assert payload["data"]["jobs"][0]["workspace_id"] == "ws-00000000-0000-0000-0000-000000000002"
 
 
 def test_hpc_stop_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
