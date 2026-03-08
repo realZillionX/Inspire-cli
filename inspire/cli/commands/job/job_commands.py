@@ -29,6 +29,107 @@ from inspire.cli.utils.job_cli import resolve_job_id
 from inspire.config import Config, ConfigError
 
 
+_STATUS_ALIAS_MAP = {
+    "PENDING": {"PENDING", "job_pending", "job_creating"},
+    "RUNNING": {"RUNNING", "job_running"},
+    "QUEUING": {"QUEUING", "job_queuing"},
+    "SUCCEEDED": {"SUCCEEDED", "job_succeeded"},
+    "FAILED": {"FAILED", "job_failed"},
+    "CANCELLED": {"CANCELLED", "job_cancelled", "job_stopped"},
+}
+
+_LIVE_REFRESH_STATUSES = {
+    "PENDING",
+    "job_pending",
+    "job_creating",
+    "RUNNING",
+    "job_running",
+    "QUEUING",
+    "job_queuing",
+}
+
+
+def _expand_status_aliases(statuses: list[str] | tuple[str, ...] | None) -> set[str]:
+    expanded: set[str] = set()
+    for value in statuses or ():
+        key = str(value).upper()
+        expanded.update(_STATUS_ALIAS_MAP.get(key, {str(value)}))
+    return expanded
+
+
+def _refresh_live_jobs_from_web_api(cache, jobs: list[dict]) -> list[dict]:  # noqa: ANN001
+    """Best-effort live refresh for cached active jobs using the web job list API."""
+    target_ids = {
+        str(job.get("job_id") or "").strip()
+        for job in jobs
+        if str(job.get("status") or "") in _LIVE_REFRESH_STATUSES
+    }
+    target_ids.discard("")
+    if not target_ids:
+        return jobs
+
+    try:
+        from inspire.platform.web.browser_api.jobs import list_jobs as web_list_jobs
+        from inspire.platform.web.session import get_web_session
+
+        try:
+            session = get_web_session(require_workspace=True)
+        except TypeError:
+            session = get_web_session()
+        refreshed: dict[str, str] = {}
+        page_size = 100
+        seen_workspaces: set[str] = set()
+        workspace_ids: list[str] = []
+
+        primary_workspace = str(getattr(session, "workspace_id", "") or "").strip()
+        if primary_workspace:
+            workspace_ids.append(primary_workspace)
+            seen_workspaces.add(primary_workspace)
+
+        for workspace_id in getattr(session, "all_workspace_ids", []) or []:
+            wid = str(workspace_id or "").strip()
+            if not wid or wid in seen_workspaces:
+                continue
+            workspace_ids.append(wid)
+            seen_workspaces.add(wid)
+
+        for workspace_id in workspace_ids or [""]:
+            page_num = 1
+            total = None
+            while target_ids - refreshed.keys():
+                items, total = web_list_jobs(
+                    workspace_id=workspace_id or None,
+                    page_num=page_num,
+                    page_size=page_size,
+                    session=session,
+                )
+                if not items:
+                    break
+                for item in items:
+                    if item.job_id in target_ids and item.status:
+                        refreshed[item.job_id] = item.status
+                if total is not None and page_num * page_size >= int(total):
+                    break
+                page_num += 1
+                if page_num > 10:
+                    break
+            if not (target_ids - refreshed.keys()):
+                break
+
+        for job in jobs:
+            job_id = str(job.get("job_id") or "").strip()
+            new_status = refreshed.get(job_id)
+            if not new_status:
+                continue
+            if job.get("status") != new_status:
+                job["status"] = new_status
+                cache.update_status(job_id, new_status)
+    except Exception:
+        return jobs
+
+    return jobs
+
+
 def _watch_jobs(
     ctx: Context,
     config: Config,
@@ -195,10 +296,11 @@ def list_jobs(
     watch: bool,
     interval: int,
 ) -> None:
-    """List recent jobs from local cache.
+    """List recent jobs from local cache with best-effort live status refresh.
 
-    Note: This lists jobs from the local cache, not from the API
-    (the API doesn't have a list endpoint).
+    The local cache remains the source of truth for which jobs are shown, but
+    active jobs are opportunistically refreshed against the web job list API so
+    the displayed status does not lag far behind the web UI.
 
     \b
     Example:
@@ -223,6 +325,8 @@ def list_jobs(
             return
 
         cache = job_deps.JobCache(config.get_expanded_cache_path())
+        jobs = cache.list_jobs(limit=0)
+        jobs = _refresh_live_jobs_from_web_api(cache, jobs)
 
         exclude_statuses = None
         if active:
@@ -234,7 +338,16 @@ def list_jobs(
                 "job_stopped",
             }
 
-        jobs = cache.list_jobs(limit=limit, status=status, exclude_statuses=exclude_statuses)
+        if status:
+            allowed_statuses = _expand_status_aliases([status])
+            jobs = [j for j in jobs if j.get("status") in allowed_statuses]
+
+        if exclude_statuses:
+            jobs = [j for j in jobs if j.get("status") not in exclude_statuses]
+
+        jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        if limit is not None and limit > 0:
+            jobs = jobs[:limit]
 
         if ctx.json_output:
             click.echo(json_formatter.format_json(jobs))

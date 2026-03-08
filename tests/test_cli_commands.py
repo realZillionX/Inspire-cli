@@ -601,6 +601,153 @@ def test_job_list_uses_local_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert TEST_JOB_ID in result.output
 
 
+def test_job_list_refreshes_live_status_from_web_api(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_config_and_auth(monkeypatch, tmp_path)
+
+    config = make_test_config(tmp_path)
+    cache = JobCache(config.get_expanded_cache_path())
+    cache.add_job(
+        job_id=TEST_JOB_ID,
+        name="cached-job",
+        resource="H200",
+        command="echo test",
+        status="PENDING",
+    )
+
+    from importlib import import_module
+
+    jobs_module = import_module("inspire.platform.web.browser_api.jobs")
+    JobInfo = jobs_module.JobInfo
+
+    monkeypatch.setattr(
+        jobs_module,
+        "list_jobs",
+        lambda workspace_id=None, page_num=1, page_size=100, session=None: (  # noqa: ARG005
+            [
+                JobInfo(
+                    job_id=TEST_JOB_ID,
+                    name="cached-job",
+                    status="job_succeeded",
+                    command="echo test",
+                    created_at="2025-01-01T00:00:00",
+                    finished_at=None,
+                    created_by_name="tester",
+                    created_by_id="user-1",
+                    project_id="project-1",
+                    project_name="Test Project",
+                    compute_group_name="H200 TestRoom",
+                    gpu_type="H200",
+                    gpu_count=8,
+                    instance_count=1,
+                    priority=9,
+                    workspace_id="ws-test-workspace",
+                )
+            ],
+            1,
+        ),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["job", "list", "--limit", "5"])
+
+    assert result.exit_code == 0
+    assert "job_succeeded" in result.output
+    refreshed = cache.get_job(TEST_JOB_ID)
+    assert refreshed is not None
+    assert refreshed["status"] == "job_succeeded"
+
+
+def test_job_list_refreshes_live_status_across_workspaces(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_config_and_auth(monkeypatch, tmp_path)
+
+    config = make_test_config(tmp_path)
+    cache = JobCache(config.get_expanded_cache_path())
+    cache.add_job(
+        job_id=TEST_JOB_ID,
+        name="cached-job",
+        resource="H200",
+        command="echo test",
+        status="PENDING",
+    )
+
+    from importlib import import_module
+
+    jobs_module = import_module("inspire.platform.web.browser_api.jobs")
+    JobInfo = jobs_module.JobInfo
+
+    class FakeSession:
+        workspace_id = "ws-other"
+        all_workspace_ids = ["ws-other", "ws-train"]
+        storage_state = {}
+
+    monkeypatch.setattr(web_session_module, "get_web_session", lambda *args, **kwargs: FakeSession())
+
+    def fake_list_jobs(workspace_id=None, page_num=1, page_size=100, session=None):  # noqa: ARG001
+        if workspace_id == "ws-train":
+            return (
+                [
+                    JobInfo(
+                        job_id=TEST_JOB_ID,
+                        name="cached-job",
+                        status="job_succeeded",
+                        command="echo test",
+                        created_at="2025-01-01T00:00:00",
+                        finished_at=None,
+                        created_by_name="tester",
+                        created_by_id="user-1",
+                        project_id="project-1",
+                        project_name="Test Project",
+                        compute_group_name="H200 TestRoom",
+                        gpu_type="H200",
+                        gpu_count=8,
+                        instance_count=1,
+                        priority=9,
+                        workspace_id="ws-train",
+                    )
+                ],
+                1,
+            )
+        return ([], 0)
+
+    monkeypatch.setattr(jobs_module, "list_jobs", fake_list_jobs)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["job", "list", "--limit", "5"])
+
+    assert result.exit_code == 0
+    assert "job_succeeded" in result.output
+    refreshed = cache.get_job(TEST_JOB_ID)
+    assert refreshed is not None
+    assert refreshed["status"] == "job_succeeded"
+
+
+def test_job_list_status_filter_accepts_api_aliases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_config_and_auth(monkeypatch, tmp_path)
+
+    config = make_test_config(tmp_path)
+    cache = JobCache(config.get_expanded_cache_path())
+    cache.add_job(
+        job_id=TEST_JOB_ID,
+        name="cached-job",
+        resource="H200",
+        command="echo test",
+        status="job_succeeded",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["job", "list", "--status", "SUCCEEDED"])
+
+    assert result.exit_code == 0
+    assert "cached-job" in result.output
+    assert TEST_JOB_ID in result.output
+
+
 def test_job_list_watch_json_does_not_clear_screen(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
