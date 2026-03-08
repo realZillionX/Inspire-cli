@@ -963,18 +963,10 @@ class TestInitCommand:
         assert project_config.exists()
 
         global_data = Config._load_toml(global_config)
-        account = global_data["accounts"]["testuser"]
         assert global_data["api"]["base_url"] == "https://example.invalid"
-        assert global_data["workspaces"]["cpu"] == workspace_id
-        assert global_data["workspaces"]["gpu"] == workspace_id
-        assert global_data["workspaces"]["internet"] == workspace_id
-        assert "api" not in account
-        assert "workspaces" not in account
-        assert "compute_groups" not in account
-        assert account["projects"]["over-quota"] == "project-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-        assert account["projects"]["good-project"] == "project-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-        assert global_data["compute_groups"][0]["id"] == "lcg-cccccccc-cccc-cccc-cccc-cccccccccccc"
-        assert global_data["compute_groups"][0]["gpu_type"] == "H100"
+        assert "workspaces" not in global_data
+        assert "compute_groups" not in global_data
+        assert "accounts" not in global_data
 
         project_data = Config._load_toml(project_config)
         assert project_data["context"]["account"] == "testuser"
@@ -983,6 +975,28 @@ class TestInitCommand:
         assert project_data["context"]["workspace_cpu"] == "cpu"
         assert project_data["context"]["workspace_gpu"] == "gpu"
         assert project_data["context"]["workspace_internet"] == "internet"
+        assert project_data["workspaces"]["cpu"] == workspace_id
+        assert project_data["workspaces"]["gpu"] == workspace_id
+        assert project_data["workspaces"]["internet"] == workspace_id
+        assert (
+            project_data["projects"]["over-quota"] == "project-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        )
+        assert (
+            project_data["projects"]["good-project"]
+            == "project-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        )
+        assert project_data["compute_groups"][0]["id"] == "lcg-cccccccc-cccc-cccc-cccc-cccccccccccc"
+        assert project_data["compute_groups"][0]["gpu_type"] == "H100"
+        account = project_data["accounts"]["testuser"]
+        assert "password" not in account
+        assert (
+            account["project_catalog"]["project-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]["name"]
+            == "Over Quota"
+        )
+        assert (
+            account["project_catalog"]["project-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]["name"]
+            == "Good Project"
+        )
 
     # ------------------------------------------------------------------
     # Helper to set up discover mocks shared across credential tests
@@ -1291,8 +1305,9 @@ class TestInitCommand:
         assert all(call["timeout"] == 111 for call in probe_calls)
         assert all(call["account_key"] == "probe-user" for call in probe_calls)
 
-        global_data = Config._load_toml(global_config)
-        project_catalog = global_data["accounts"]["probe-user"]["project_catalog"]
+        project_config = tmp_path / PROJECT_CONFIG_DIR / CONFIG_FILENAME
+        project_data = Config._load_toml(project_config)
+        project_catalog = project_data["accounts"]["probe-user"]["project_catalog"]
         assert (
             project_catalog["project-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]["shared_path_group"]
             == "/inspire/hdd/global_user/alpha"
@@ -1371,8 +1386,9 @@ class TestInitCommand:
 
         assert result.exit_code == 0
 
-        global_data = Config._load_toml(global_config)
-        project_catalog = global_data["accounts"]["probe-user"]["project_catalog"]
+        project_config = tmp_path / PROJECT_CONFIG_DIR / CONFIG_FILENAME
+        project_data = Config._load_toml(project_config)
+        project_catalog = project_data["accounts"]["probe-user"]["project_catalog"]
         assert (
             project_catalog["project-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]["shared_path_group"]
             == "/inspire/hdd/global_user/alpha"

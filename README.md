@@ -194,6 +194,7 @@ inspire resources specs --workspace cpu --group HPC-可上网区资源-2 --json
 3. **环境变量**
 
 推荐使用 `inspire init --discover` 自动生成配置，或 `inspire config show` 查看合并结果。
+默认分层下，全局配置主要保存账号级敏感信息，项目配置主要保存工作空间别名、计算组目录和默认值。
 
 ### 多账号支持
 
@@ -227,11 +228,13 @@ force_proxy = true
 # rtunnel = "socks5://127.0.0.1:1080"
 
 [workspaces]
+# 项目级 workspace alias，供 CLI 做资源路由。
 cpu = "ws-..."
 gpu = "ws-..."
 internet = "ws-..."
 
 [[compute_groups]]
+# 项目级 compute group 目录，由当前仓库的 discover 结果生成。
 name = "H100 Cluster"
 id = "lcg-..."
 gpu_type = "H100"

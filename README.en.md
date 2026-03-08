@@ -33,7 +33,7 @@ inspire --help
 inspire init --discover -u <username> --base-url https://qz.sii.edu.cn
 ```
 
-This opens a browser for CAS Web SSO login, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. Writes both global config (`~/.config/inspire/config.toml`) and project config (`.inspire/config.toml`).
+This opens a browser for CAS Web SSO login, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. It writes sensitive account data such as passwords and base URL to the global config (`~/.config/inspire/config.toml`), while project-specific resource mappings such as workspace aliases and compute groups are written to the project config (`.inspire/config.toml`).
 
 Set password as an env var to avoid repeated prompts:
 
@@ -193,7 +193,7 @@ Config is loaded in priority order (later overrides earlier):
 2. **Project config**: `./.inspire/config.toml`
 3. **Environment variables**
 
-Use `inspire init --discover` for auto-generation, or `inspire config show` to inspect the merged result.
+Use `inspire init --discover` for auto-generation, or `inspire config show` to inspect the merged result. In the default split, global config stores account-level secrets and project config stores resource mappings and defaults.
 
 ### Multi-account Support
 
@@ -227,11 +227,13 @@ force_proxy = true
 # rtunnel = "socks5://127.0.0.1:1080"
 
 [workspaces]
+# Project-local workspace aliases for CLI routing.
 cpu = "ws-..."
 gpu = "ws-..."
 internet = "ws-..."
 
 [[compute_groups]]
+# Project-local compute-group catalog discovered for this repo.
 name = "H100 Cluster"
 id = "lcg-..."
 gpu_type = "H100"

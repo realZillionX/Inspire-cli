@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 import re
@@ -955,21 +956,86 @@ def _load_discovery_global_state(
     return global_data, account_section
 
 
+def _load_discovery_project_state(
+    *,
+    project_path: Path,
+    account_key: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    project_data: dict[str, Any] = {}
+    if project_path.exists():
+        project_data = Config._load_toml(project_path)
+
+    accounts = project_data.get("accounts")
+    if not isinstance(accounts, dict):
+        accounts = {}
+        project_data["accounts"] = accounts
+
+    account_section = accounts.get(account_key)
+    if not isinstance(account_section, dict):
+        account_section = {}
+        accounts[account_key] = account_section
+
+    return project_data, account_section
+
+
+def _seed_project_discovery_metadata(
+    *,
+    project_data: dict[str, Any],
+    project_account_section: dict[str, Any],
+    global_data: dict[str, Any],
+    global_account_section: dict[str, Any],
+) -> None:
+    if not isinstance(project_data.get("projects"), dict):
+        global_projects = global_account_section.get("projects")
+        if isinstance(global_projects, dict) and global_projects:
+            project_data["projects"] = dict(global_projects)
+
+    if not isinstance(project_data.get("workspaces"), dict):
+        global_workspaces = global_data.get("workspaces")
+        if not isinstance(global_workspaces, dict):
+            global_workspaces = global_account_section.get("workspaces")
+        if isinstance(global_workspaces, dict) and global_workspaces:
+            project_data["workspaces"] = dict(global_workspaces)
+
+    if not isinstance(project_data.get("compute_groups"), list):
+        global_compute_groups = global_data.get("compute_groups")
+        if not isinstance(global_compute_groups, list):
+            global_compute_groups = global_account_section.get("compute_groups")
+        if isinstance(global_compute_groups, list) and global_compute_groups:
+            project_data["compute_groups"] = deepcopy(global_compute_groups)
+
+    if not isinstance(project_account_section.get("project_catalog"), dict):
+        global_catalog = global_account_section.get("project_catalog")
+        if isinstance(global_catalog, dict) and global_catalog:
+            project_account_section["project_catalog"] = deepcopy(global_catalog)
+
+    for key in ("shared_path_group", "train_job_workdir"):
+        if str(project_account_section.get(key) or "").strip():
+            continue
+        value = str(global_account_section.get(key) or "").strip()
+        if value:
+            project_account_section[key] = value
+
+
 def _resolve_project_catalog_aliases(
     *,
-    account_section: dict[str, Any],
+    project_data: dict[str, Any],
+    project_account_section: dict[str, Any],
     projects: list[object],
 ) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
-    existing_projects = account_section.get("projects")
+    existing_projects = project_data.get("projects")
+    if not isinstance(existing_projects, dict):
+        existing_projects = project_account_section.get("projects")
     if not isinstance(existing_projects, dict):
         existing_projects = {}
     merged_projects, alias_for_id = _build_project_aliases(projects, existing=existing_projects)
-    account_section["projects"] = merged_projects
+    project_data["projects"] = merged_projects
+    project_account_section.pop("projects", None)
 
-    project_catalog = account_section.get("project_catalog")
+    project_catalog = project_account_section.get("project_catalog")
     if not isinstance(project_catalog, dict):
         project_catalog = {}
-        account_section["project_catalog"] = project_catalog
+        project_account_section["project_catalog"] = project_catalog
 
     typed_catalog: dict[str, dict[str, Any]] = {}
     for project_id, entry in project_catalog.items():
@@ -980,7 +1046,7 @@ def _resolve_project_catalog_aliases(
         else:
             typed_catalog[project_id] = {}
 
-    account_section["project_catalog"] = typed_catalog
+    project_account_section["project_catalog"] = typed_catalog
     return alias_for_id, typed_catalog
 
 
@@ -1088,12 +1154,18 @@ def _print_shared_path_group_summary(
 
 def _get_existing_workspace_aliases(
     *,
+    project_data: dict[str, Any],
+    project_account_section: dict[str, Any],
     global_data: dict[str, Any],
-    account_section: dict[str, Any],
+    global_account_section: dict[str, Any],
 ) -> dict[str, str]:
-    existing_workspaces = global_data.get("workspaces")
+    existing_workspaces = project_data.get("workspaces")
     if not isinstance(existing_workspaces, dict):
-        existing_workspaces = account_section.get("workspaces")
+        existing_workspaces = project_account_section.get("workspaces")
+    if not isinstance(existing_workspaces, dict):
+        existing_workspaces = global_data.get("workspaces")
+    if not isinstance(existing_workspaces, dict):
+        existing_workspaces = global_account_section.get("workspaces")
     if not isinstance(existing_workspaces, dict):
         return {}
     return dict(existing_workspaces)
@@ -1238,16 +1310,20 @@ def _prompt_workspace_aliases(
 
 def _persist_workspace_aliases(
     *,
+    project_data: dict[str, Any],
+    project_account_section: dict[str, Any],
     global_data: dict[str, Any],
-    account_section: dict[str, Any],
+    global_account_section: dict[str, Any],
     config: Config,
     session,  # noqa: ANN001
     workspace_id: str,
     force: bool,
 ) -> None:
     merged_workspaces = _get_existing_workspace_aliases(
+        project_data=project_data,
+        project_account_section=project_account_section,
         global_data=global_data,
-        account_section=account_section,
+        global_account_section=global_account_section,
     )
     env_overrides = _merge_workspace_aliases(
         config=config,
@@ -1266,8 +1342,8 @@ def _persist_workspace_aliases(
         discovered_workspace_ids=discovered_workspace_ids,
         discovered_workspace_names=discovered_workspace_names,
     )
-    global_data["workspaces"] = merged_workspaces
-    account_section.pop("workspaces", None)
+    project_data["workspaces"] = merged_workspaces
+    project_account_section.pop("workspaces", None)
 
 
 def _persist_api_base_url(
@@ -1415,20 +1491,60 @@ def _correct_workspace_aliases(
 
 def _persist_compute_groups(
     *,
+    project_data: dict[str, Any],
+    project_account_section: dict[str, Any],
     global_data: dict[str, Any],
-    account_section: dict[str, Any],
+    global_account_section: dict[str, Any],
     compute_groups: list[dict[str, Any]],
 ) -> None:
-    existing_compute_groups = global_data.get("compute_groups")
+    existing_compute_groups = project_data.get("compute_groups")
     if not isinstance(existing_compute_groups, list):
-        existing_compute_groups = account_section.get("compute_groups")
+        existing_compute_groups = project_account_section.get("compute_groups")
+    if not isinstance(existing_compute_groups, list):
+        existing_compute_groups = global_data.get("compute_groups")
+    if not isinstance(existing_compute_groups, list):
+        existing_compute_groups = global_account_section.get("compute_groups")
     if not isinstance(existing_compute_groups, list):
         existing_compute_groups = []
     if compute_groups:
-        global_data["compute_groups"] = _merge_compute_groups(
+        project_data["compute_groups"] = _merge_compute_groups(
             existing_compute_groups, compute_groups
         )
-    account_section.pop("compute_groups", None)
+    project_account_section.pop("compute_groups", None)
+
+
+def _cleanup_global_discovery_metadata(
+    *,
+    global_data: dict[str, Any],
+    account_key: str,
+) -> None:
+    global_data.pop("workspaces", None)
+    global_data.pop("compute_groups", None)
+
+    accounts = global_data.get("accounts")
+    if not isinstance(accounts, dict):
+        return
+
+    account_section = accounts.get(account_key)
+    if not isinstance(account_section, dict):
+        if not accounts:
+            global_data.pop("accounts", None)
+        return
+
+    for key in (
+        "projects",
+        "workspaces",
+        "compute_groups",
+        "project_catalog",
+        "shared_path_group",
+        "train_job_workdir",
+    ):
+        account_section.pop(key, None)
+
+    if not account_section:
+        accounts.pop(account_key, None)
+    if not accounts:
+        global_data.pop("accounts", None)
 
 
 def _resolve_probe_defaults(
@@ -1693,15 +1809,12 @@ def _prompt_target_dir(
 def _write_discovered_project_config(
     *,
     project_path: Path,
+    project_data: dict[str, Any],
     config: Config,
     account_key: str,
     selected_alias: str,
     target_dir: str | None = None,
 ) -> None:
-    project_data: dict[str, Any] = {}
-    if project_path.exists():
-        project_data = Config._load_toml(project_path)
-
     auth_section = _get_or_create_dict_table(container=project_data, key="auth")
     auth_section["username"] = account_key
 
@@ -1777,8 +1890,19 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         global_path=global_path,
         account_key=account_key,
     )
+    project_data, project_account_section = _load_discovery_project_state(
+        project_path=project_path,
+        account_key=account_key,
+    )
+    _seed_project_discovery_metadata(
+        project_data=project_data,
+        project_account_section=project_account_section,
+        global_data=global_data,
+        global_account_section=account_section,
+    )
     alias_for_id, project_catalog = _resolve_project_catalog_aliases(
-        account_section=account_section,
+        project_data=project_data,
+        project_account_section=project_account_section,
         projects=projects,
     )
     _populate_project_catalog(
@@ -1791,7 +1915,7 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         force=force,
     )
     _update_account_shared_path_group(
-        account_section=account_section,
+        account_section=project_account_section,
         project_catalog=project_catalog,
         force=force,
     )
@@ -1802,14 +1926,16 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
     )
 
     _persist_workspace_aliases(
+        project_data=project_data,
+        project_account_section=project_account_section,
         global_data=global_data,
-        account_section=account_section,
+        global_account_section=account_section,
         config=config,
         session=session,
         workspace_id=workspace_id,
         force=force,
     )
-    merged_workspaces = global_data.get("workspaces")
+    merged_workspaces = project_data.get("workspaces")
     if not isinstance(merged_workspaces, dict):
         merged_workspaces = {}
 
@@ -1847,8 +1973,10 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
             compute_groups.append(cg)
     _correct_workspace_aliases(merged_workspaces, compute_groups)
     _persist_compute_groups(
+        project_data=project_data,
+        project_account_section=project_account_section,
         global_data=global_data,
-        account_section=account_section,
+        global_account_section=account_section,
         compute_groups=compute_groups,
     )
 
@@ -1883,6 +2011,10 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         account_section=account_section,
         prompted_credentials=prompted_credentials,
     )
+    _cleanup_global_discovery_metadata(
+        global_data=global_data,
+        account_key=account_key,
+    )
 
     global_path.parent.mkdir(parents=True, exist_ok=True)
     global_path.write_text(_toml_dumps(global_data))
@@ -1903,6 +2035,7 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
     )
     _write_discovered_project_config(
         project_path=project_path,
+        project_data=project_data,
         config=config,
         account_key=account_key,
         selected_alias=selected_alias,
