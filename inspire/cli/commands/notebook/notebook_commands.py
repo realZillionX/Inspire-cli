@@ -1101,7 +1101,7 @@ def list_notebooks(
         inspire notebook list -s RUNNING
         inspire notebook list -s RUNNING -s STOPPED
         inspire notebook list --name my-notebook
-        inspire notebook list --workspace gpu -s RUNNING -n 5
+        inspire notebook list --workspace <name> -s RUNNING -n 5
         inspire notebook list --all-workspaces
         inspire notebook list --json
     """
