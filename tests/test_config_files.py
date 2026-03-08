@@ -998,6 +998,187 @@ class TestInitCommand:
             == "Good Project"
         )
 
+    def test_prompt_workspace_aliases_force_removes_duplicate_legacy_keys(self) -> None:
+        from inspire.cli.commands.init.discover import _prompt_workspace_aliases
+
+        merged_workspaces = {
+            "cpu": "ws-cpu",
+            "gpu": "ws-gpu",
+            "internet": "ws-net",
+            "hpc": "ws-hpc",
+            "whole_node": "ws-node",
+            "custom": "ws-custom",
+        }
+
+        _prompt_workspace_aliases(
+            force=True,
+            workspace_id="ws-cpu",
+            merged_workspaces=merged_workspaces,
+            env_overrides={},
+            discovered_workspace_ids=[
+                "ws-cpu",
+                "ws-gpu",
+                "ws-net",
+                "ws-hpc",
+                "ws-node",
+            ],
+            discovered_workspace_names={
+                "ws-cpu": "CPU资源空间",
+                "ws-gpu": "分布式训练空间",
+                "ws-net": "上网空间",
+                "ws-hpc": "高性能计算空间",
+                "ws-node": "整节点空间",
+            },
+        )
+
+        assert merged_workspaces["CPU资源空间"] == "ws-cpu"
+        assert merged_workspaces["分布式训练空间"] == "ws-gpu"
+        assert merged_workspaces["上网空间"] == "ws-net"
+        assert merged_workspaces["高性能计算空间"] == "ws-hpc"
+        assert merged_workspaces["整节点空间"] == "ws-node"
+        assert merged_workspaces["custom"] == "ws-custom"
+        for alias in ("cpu", "gpu", "internet", "hpc", "whole_node"):
+            assert alias not in merged_workspaces
+
+    def test_init_discover_force_preserves_existing_target_dir_and_cleans_obsolete_sections(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        from inspire.platform.web.session.models import WebSession
+        from inspire.platform.web.browser_api.availability.models import GPUAvailability
+        import inspire.platform.web.session as web_session_module
+        import inspire.platform.web.browser_api as browser_api_module
+
+        global_config, workspace_id = self._setup_discover_mocks(monkeypatch, tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("INSPIRE_USERNAME", "testuser")
+        monkeypatch.setenv("INSPIRE_BASE_URL", "https://example.invalid")
+
+        existing_target_dir = "/inspire/hdd/project/chj_code/video-reason"
+        catalog_workdir = "/inspire/hdd/project/tongjingqi-CZXS25110029"
+        gpu_workspace_id = "ws-22222222-2222-2222-2222-222222222222"
+        internet_workspace_id = "ws-33333333-3333-3333-3333-333333333333"
+        hpc_workspace_id = "ws-44444444-4444-4444-4444-444444444444"
+        whole_node_workspace_id = "ws-55555555-5555-5555-5555-555555555555"
+
+        session = WebSession(
+            storage_state={"cookies": [], "origins": []},
+            created_at=0.0,
+            workspace_id=workspace_id,
+            login_username="testuser",
+            all_workspace_ids=[
+                workspace_id,
+                gpu_workspace_id,
+                internet_workspace_id,
+                hpc_workspace_id,
+                whole_node_workspace_id,
+            ],
+            all_workspace_names={
+                workspace_id: "CPU资源空间",
+                gpu_workspace_id: "分布式训练空间",
+                internet_workspace_id: "上网空间",
+                hpc_workspace_id: "高性能计算空间",
+                whole_node_workspace_id: "整节点空间",
+            },
+        )
+        monkeypatch.setattr(web_session_module, "get_web_session", lambda **_: session)
+        monkeypatch.setattr(web_session_module, "login_with_playwright", lambda *a, **kw: session)
+
+        project_config = tmp_path / PROJECT_CONFIG_DIR / CONFIG_FILENAME
+        project_config.parent.mkdir(parents=True, exist_ok=True)
+        project_config.write_text(
+            (
+                f"[paths]\n"
+                f'target_dir = "{existing_target_dir}"\n\n'
+                "[defaults]\n"
+                'project = "old-project"\n\n'
+                "[job]\n"
+                'image = "job-image"\n\n'
+                "[notebook]\n"
+                'image = "notebook-image"\n\n'
+                "[workspaces]\n"
+                f'cpu = "{workspace_id}"\n'
+                f'gpu = "{gpu_workspace_id}"\n'
+                f'internet = "{internet_workspace_id}"\n'
+                f'hpc = "{hpc_workspace_id}"\n'
+                f'whole_node = "{whole_node_workspace_id}"\n'
+            )
+        )
+
+        group_ids = {
+            workspace_id: "cg-cpu",
+            gpu_workspace_id: "cg-gpu",
+            internet_workspace_id: "cg-internet",
+            hpc_workspace_id: "cg-hpc",
+            whole_node_workspace_id: "cg-whole-node",
+        }
+        group_names = {
+            workspace_id: "CPU Group",
+            gpu_workspace_id: "H100 (CUDA 12.8)",
+            internet_workspace_id: "Internet CPU",
+            hpc_workspace_id: "HPC H100",
+            whole_node_workspace_id: "Whole Node H100",
+        }
+        gpu_types = {
+            workspace_id: "CPU",
+            gpu_workspace_id: "H100",
+            internet_workspace_id: "CPU",
+            hpc_workspace_id: "H100",
+            whole_node_workspace_id: "H100",
+        }
+
+        def fake_list_compute_groups(*, workspace_id, **_):
+            return [
+                {
+                    "logic_compute_group_id": group_ids[workspace_id],
+                    "name": group_names[workspace_id],
+                }
+            ]
+
+        def fake_get_accurate_gpu_availability(*, workspace_id, **_):
+            gpu_type = gpu_types[workspace_id]
+            total_gpus = 8 if gpu_type != "CPU" else 0
+            return [
+                GPUAvailability(
+                    group_id=group_ids[workspace_id],
+                    group_name=group_names[workspace_id],
+                    gpu_type=gpu_type,
+                    total_gpus=total_gpus,
+                    used_gpus=0,
+                    available_gpus=total_gpus,
+                    low_priority_gpus=0,
+                )
+            ]
+
+        monkeypatch.setattr(browser_api_module, "list_compute_groups", fake_list_compute_groups)
+        monkeypatch.setattr(
+            browser_api_module,
+            "get_accurate_gpu_availability",
+            fake_get_accurate_gpu_availability,
+        )
+        monkeypatch.setattr(
+            browser_api_module,
+            "get_train_job_workdir",
+            lambda **_: catalog_workdir,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(init, ["--discover", "--force"])
+
+        assert result.exit_code == 0
+
+        project_data = Config._load_toml(project_config)
+        assert project_data["paths"]["target_dir"] == existing_target_dir
+        assert "defaults" not in project_data
+        assert "job" not in project_data
+        assert "notebook" not in project_data
+        assert project_data["workspaces"]["CPU资源空间"] == workspace_id
+        assert project_data["workspaces"]["分布式训练空间"] == gpu_workspace_id
+        assert project_data["workspaces"]["上网空间"] == internet_workspace_id
+        assert project_data["workspaces"]["高性能计算空间"] == hpc_workspace_id
+        assert project_data["workspaces"]["整节点空间"] == whole_node_workspace_id
+        for alias in ("cpu", "gpu", "internet", "hpc", "whole_node"):
+            assert alias not in project_data["workspaces"]
+
     # ------------------------------------------------------------------
     # Helper to set up discover mocks shared across credential tests
     # ------------------------------------------------------------------

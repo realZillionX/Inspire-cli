@@ -1431,6 +1431,27 @@ def _prompt_workspace_aliases(
             merged_workspaces[workspace_name] = workspace_value
 
     if added_named_workspace:
+        if force:
+            actual_workspace_names = {
+                str(raw_name or "").strip()
+                for raw_name in discovered_workspace_names.values()
+                if str(raw_name or "").strip()
+            }
+            covered_workspace_ids = {
+                str(raw_workspace_id or "").strip()
+                for raw_name, raw_workspace_id in merged_workspaces.items()
+                if str(raw_name or "").strip() in actual_workspace_names
+                and str(raw_workspace_id or "").strip()
+            }
+            duplicate_aliases = [
+                str(raw_name or "").strip()
+                for raw_name, raw_workspace_id in merged_workspaces.items()
+                if str(raw_name or "").strip()
+                and str(raw_name or "").strip() not in actual_workspace_names
+                and str(raw_workspace_id or "").strip() in covered_workspace_ids
+            ]
+            for alias in duplicate_aliases:
+                merged_workspaces.pop(alias, None)
         return
 
     # Keep the legacy fallback only when discovery could not resolve workspace names.
@@ -1901,11 +1922,11 @@ def _get_or_create_dict_table(
     return section
 
 
-
 def _prompt_target_dir(
     *,
     force: bool,
     cli_target_dir: str | None,
+    config: Config | None = None,
     selected_project: object,
     project_catalog: dict[str, dict[str, Any]],
 ) -> str | None:
@@ -1915,7 +1936,8 @@ def _prompt_target_dir(
     catalog_workdir = str(entry.get("workdir") or "").strip()
 
     if force:
-        return cli_target_dir or catalog_workdir or None
+        existing = str(getattr(config, "target_dir", "") or "").strip() if config else ""
+        return cli_target_dir or existing or catalog_workdir or None
 
     default = cli_target_dir or catalog_workdir or ""
     if default:
@@ -1994,6 +2016,9 @@ def _write_discovered_project_config(
     if target_dir:
         paths_section = _get_or_create_dict_table(container=project_data, key="paths")
         paths_section["target_dir"] = target_dir
+
+    for obsolete_key in ("defaults", "job", "notebook"):
+        project_data.pop(obsolete_key, None)
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
     project_path.write_text(_toml_dumps(project_data))
@@ -2218,6 +2243,7 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
     target_dir = _prompt_target_dir(
         force=force,
         cli_target_dir=cli_target_dir,
+        config=config,
         selected_project=selected_project,
         project_catalog=project_catalog,
     )
