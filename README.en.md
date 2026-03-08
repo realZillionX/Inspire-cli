@@ -4,6 +4,8 @@
 
 Command-line interface for the Inspire HPC training platform.
 
+> 📖 **Full operational guide:** [Inspire Skill - Platform Operations Manual](https://fudan-nlp.feishu.cn/wiki/D2RXwnZcQiUQadkadJgcC1aEnLh) (Feishu, team access required)
+
 ## Installation
 
 ```bash
