@@ -5,6 +5,8 @@ from __future__ import annotations
 import atexit
 from typing import Callable, Optional
 
+import requests as requests_lib
+
 from inspire.platform.web.session.browser_client import _BrowserRequestClient  # noqa: F401
 from inspire.platform.web.session.browser_client import (
     _close_browser_client,
@@ -105,7 +107,7 @@ def request_json(
                 return resp.json()
             except ValueError as e:
                 raise SessionExpiredError("Session expired or invalid (non-JSON response)") from e
-        except SessionExpiredError:
+        except (SessionExpiredError, requests_lib.exceptions.RequestException):
             _BROWSER_API_FORCE_BROWSER = True
         finally:
             http.close()

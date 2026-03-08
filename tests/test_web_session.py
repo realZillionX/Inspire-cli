@@ -3,6 +3,7 @@ import threading
 from pathlib import Path
 
 import pytest
+import requests
 
 from inspire.config import Config
 from inspire.platform.web import session as ws
@@ -145,6 +146,40 @@ def test_request_json_non_json_triggers_fallback(monkeypatch: pytest.MonkeyPatch
     )
 
     http = DummyHTTP(DummyResponse(200, payload=ValueError("bad json")))
+    browser = DummyBrowserClient({"ok": True})
+
+    monkeypatch.setattr(ws, "build_requests_session", lambda _session, _url: http)
+    monkeypatch.setattr(ws, "_get_browser_client", lambda _session: browser)
+    monkeypatch.setattr(ws, "_BROWSER_API_FORCE_BROWSER", False)
+
+    result = ws.request_json(session, "GET", "https://example.test")
+
+    assert result == {"ok": True}
+    assert ws._BROWSER_API_FORCE_BROWSER is True
+    assert http.calls
+    assert browser.calls
+
+
+def test_request_json_transport_error_triggers_fallback(monkeypatch: pytest.MonkeyPatch):
+    session = WebSession(
+        storage_state={"cookies": [{"name": "session", "value": "abc"}]},
+        cookies={"session": "abc"},
+        workspace_id="ws-test",
+        created_at=0,
+    )
+
+    class FailingHTTP:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get(self, url, headers=None, timeout=None):  # noqa: ANN001
+            self.calls.append(("GET", url, headers, timeout))
+            raise requests.exceptions.SSLError("ssl eof")
+
+        def close(self) -> None:
+            pass
+
+    http = FailingHTTP()
     browser = DummyBrowserClient({"ok": True})
 
     monkeypatch.setattr(ws, "build_requests_session", lambda _session, _url: http)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 from copy import deepcopy
 import json
 import os
@@ -1513,6 +1514,20 @@ def _persist_compute_groups(
     project_account_section.pop("compute_groups", None)
 
 
+def _extract_workspace_ids_from_compute_groups(
+    compute_groups: list[dict[str, Any]] | None,
+) -> set[str]:
+    workspace_ids: set[str] = set()
+    for item in compute_groups or []:
+        if not isinstance(item, dict):
+            continue
+        for ws_id in item.get("workspace_ids") or []:
+            value = str(ws_id or "").strip()
+            if value:
+                workspace_ids.add(value)
+    return workspace_ids
+
+
 def _cleanup_global_discovery_metadata(
     *,
     global_data: dict[str, Any],
@@ -1960,17 +1975,40 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         if ws_str:
             all_ws_ids.add(ws_str)
 
-    compute_groups: list[dict[str, Any]] = []
-    for ws_id in sorted(all_ws_ids):
-        for cg in _discover_compute_groups(
-            browser_api_module=browser_api_module,
-            session=session,
-            workspace_id=ws_id,
-        ):
-            cg.setdefault("workspace_ids", [])
-            if ws_id not in cg["workspace_ids"]:
-                cg["workspace_ids"].append(ws_id)
-            compute_groups.append(cg)
+    existing_project_compute_groups = project_data.get("compute_groups")
+    if not isinstance(existing_project_compute_groups, list):
+        existing_project_compute_groups = []
+
+    known_workspace_ids = _extract_workspace_ids_from_compute_groups(existing_project_compute_groups)
+    missing_workspace_ids = sorted(ws_id for ws_id in all_ws_ids if ws_id not in known_workspace_ids)
+
+    compute_groups: list[dict[str, Any]] = list(existing_project_compute_groups)
+    if missing_workspace_ids:
+        max_workers = min(len(missing_workspace_ids), 6)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_map = {
+                pool.submit(
+                    _discover_compute_groups,
+                    browser_api_module=browser_api_module,
+                    session=session,
+                    workspace_id=ws_id,
+                ): ws_id
+                for ws_id in missing_workspace_ids
+            }
+            workspace_results: dict[str, list[dict[str, Any]]] = {}
+            for future in concurrent.futures.as_completed(future_map):
+                ws_id = future_map[future]
+                try:
+                    workspace_results[ws_id] = future.result()
+                except Exception:
+                    workspace_results[ws_id] = []
+
+        for ws_id in missing_workspace_ids:
+            for cg in workspace_results.get(ws_id, []):
+                cg.setdefault("workspace_ids", [])
+                if ws_id not in cg["workspace_ids"]:
+                    cg["workspace_ids"].append(ws_id)
+                compute_groups.append(cg)
     _correct_workspace_aliases(merged_workspaces, compute_groups)
     _persist_compute_groups(
         project_data=project_data,
@@ -2070,6 +2108,7 @@ def _init_discover_mode(
     """Initialize per-account catalogs by discovering projects and compute groups."""
     from inspire.platform.web import browser_api as browser_api_module
     from inspire.platform.web import session as web_session_module
+    from inspire.platform.web.session.browser_client import _close_browser_client
     from inspire.platform.web.session import DEFAULT_WORKSPACE_ID
 
     config, _ = Config.from_files_and_env(require_credentials=False, require_target_dir=False)
@@ -2092,22 +2131,25 @@ def _init_discover_mode(
         probe_shared_path=probe_shared_path,
         probe_limit=probe_limit,
     )
-    _persist_discovery_catalog(
-        _DiscoveryPersistRequest(
-            force=force,
-            config=config,
-            browser_api_module=browser_api_module,
-            session=session,
-            account_key=account_key,
-            workspace_id=workspace_id,
-            projects=projects,
-            selected_project=selected_project,
-            probe_shared_path=probe_shared_path,
-            probe_limit=probe_limit,
-            probe_keep_notebooks=probe_keep_notebooks,
-            probe_pubkey=probe_pubkey,
-            probe_timeout=probe_timeout,
-            prompted_credentials=prompted_credentials,
-            cli_target_dir=cli_target_dir,
+    try:
+        _persist_discovery_catalog(
+            _DiscoveryPersistRequest(
+                force=force,
+                config=config,
+                browser_api_module=browser_api_module,
+                session=session,
+                account_key=account_key,
+                workspace_id=workspace_id,
+                projects=projects,
+                selected_project=selected_project,
+                probe_shared_path=probe_shared_path,
+                probe_limit=probe_limit,
+                probe_keep_notebooks=probe_keep_notebooks,
+                probe_pubkey=probe_pubkey,
+                probe_timeout=probe_timeout,
+                prompted_credentials=prompted_credentials,
+                cli_target_dir=cli_target_dir,
+            )
         )
-    )
+    finally:
+        _close_browser_client()
