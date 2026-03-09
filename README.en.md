@@ -33,8 +33,8 @@ inspire --help
 inspire init --discover -u <username> --base-url https://qz.sii.edu.cn
 ```
 
-This opens a browser for CAS Web SSO login, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. It writes sensitive account data such as passwords and base URL to the global config (`~/.config/inspire/config.toml`), while project-specific resource mappings such as workspace aliases and compute groups are written to the project config (`.inspire/config.toml`).
-When the account can access multiple workspaces, discovery attempts to aggregate visible projects across them. Workspace aliases and compute-group catalogs remain project-local.
+This opens a browser for CAS Web SSO login, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. It writes sensitive account data such as passwords and base URL to the global config (`~/.config/inspire/config.toml`), while project-specific resource mappings and compute-group catalogs are written to the project config (`.inspire/config.toml`).
+When the account can access multiple workspaces, discovery attempts to aggregate visible projects across them. Project-local workspace mappings use the platform's actual workspace names rather than abstract aliases such as `cpu`, `gpu`, or `internet`.
 
 Set password as an env var to avoid repeated prompts:
 
@@ -179,7 +179,7 @@ inspire resources list
 inspire project list
 
 # Query compute group specs
-inspire resources specs --workspace cpu --group HPC-可上网区资源-2 --json
+inspire resources specs --workspace CPU资源空间 --group HPC-可上网区资源-2 --json
 ```
 
 ---
@@ -231,10 +231,10 @@ force_proxy = true
 # rtunnel = "socks5://127.0.0.1:1080"
 
 [workspaces]
-# Project-local workspace aliases for CLI routing.
-cpu = "ws-..."
-gpu = "ws-..."
-internet = "ws-..."
+# Project-local workspace mappings using the platform's actual names.
+"CPU资源空间" = "ws-..."
+"分布式训练空间" = "ws-..."
+"可上网GPU资源" = "ws-..."
 
 [[compute_groups]]
 # Project-local compute-group catalog discovered for this repo.

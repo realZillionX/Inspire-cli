@@ -34,7 +34,7 @@ inspire init --discover -u <用户名> --base-url https://qz.sii.edu.cn
 ```
 
 该命令会拉起浏览器完成 CAS Web SSO 登录，自动发现你的项目、工作空间、计算组、共享文件系统路径，并写入全局配置 `~/.config/inspire/config.toml` 和项目配置 `.inspire/config.toml`。
-当账号可见多个 workspace 时，discover 会尽量聚合可见项目；工作空间别名和计算组目录仍以项目级配置为准。
+当账号可见多个 workspace 时，discover 会尽量聚合可见项目；项目级配置中的工作空间映射和计算组目录使用平台里的实际名称，而不是 `cpu/gpu/internet` 这类抽象别名。
 
 设置密码环境变量可避免重复输入：
 
@@ -179,7 +179,7 @@ inspire resources list
 inspire project list
 
 # 查询计算组可用规格
-inspire resources specs --workspace cpu --group HPC-可上网区资源-2 --json
+inspire resources specs --workspace CPU资源空间 --group HPC-可上网区资源-2 --json
 ```
 
 ---
@@ -232,10 +232,10 @@ force_proxy = true
 # rtunnel = "socks5://127.0.0.1:1080"
 
 [workspaces]
-# 项目级 workspace alias，供 CLI 做资源路由。
-cpu = "ws-..."
-gpu = "ws-..."
-internet = "ws-..."
+# 项目级 workspace 映射，使用平台里的实际名称。
+"CPU资源空间" = "ws-..."
+"分布式训练空间" = "ws-..."
+"可上网GPU资源" = "ws-..."
 
 [[compute_groups]]
 # 项目级 compute group 目录，由当前仓库的 discover 结果生成。
