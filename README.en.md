@@ -10,10 +10,10 @@ Command-line interface for the Inspire HPC training platform. Supports notebook 
 
 ```bash
 # Via SSH (recommended)
-uv tool install git+ssh://git@github.com/EmbodiedForge/Inspire-cli.git
+uv tool install git+ssh://git@github.com/realZillionX/Inspire-cli.git
 
 # Or via HTTPS
-uv tool install git+https://github.com/EmbodiedForge/Inspire-cli.git
+uv tool install git+https://github.com/realZillionX/Inspire-cli.git
 ```
 
 ### Local Development

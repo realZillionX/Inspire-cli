@@ -10,10 +10,10 @@
 
 ```bash
 # 通过 SSH（推荐）
-uv tool install git+ssh://git@github.com/EmbodiedForge/Inspire-cli.git
+uv tool install git+ssh://git@github.com/realZillionX/Inspire-cli.git
 
 # 或通过 HTTPS
-uv tool install git+https://github.com/EmbodiedForge/Inspire-cli.git
+uv tool install git+https://github.com/realZillionX/Inspire-cli.git
 ```
 
 ### 本地开发
