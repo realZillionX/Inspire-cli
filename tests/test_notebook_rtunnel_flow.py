@@ -159,3 +159,37 @@ def test_ensure_proxy_readiness_without_fallback_url(
     assert len(diagnostics) == 2
     assert diagnostics[0].startswith("derived=")
     assert diagnostics[1].startswith("primary=")
+
+
+def test_ensure_proxy_readiness_reports_inconclusive_http_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    primary_url = "https://nat.example/jupyter/nb/proxy/31337/"
+
+    def fake_wait_for_rtunnel_reachable(*, proxy_url, timeout_s, context, page) -> None:  # type: ignore[no-untyped-def]
+        assert proxy_url
+        assert timeout_s > 0
+        assert context is not None
+        assert page is not None
+        raise ValueError(
+            "HTTP readiness probe stayed inconclusive with plain-text 404 on 3 consecutive "
+            "attempts (2s elapsed).\nLast response: 404 page not found"
+        )
+
+    monkeypatch.setattr(flow_module, "wait_for_rtunnel_reachable", fake_wait_for_rtunnel_reachable)
+    monkeypatch.setattr(flow_module, "_build_vscode_proxy_url", lambda _page, port: None)
+
+    resolved, diagnostics = flow_module._ensure_proxy_readiness_with_fallback(
+        proxy_url=primary_url,
+        port=31337,
+        timeout=60,
+        context=object(),
+        page=DummyPage(),
+    )
+
+    captured = capsys.readouterr()
+    assert resolved == primary_url
+    assert len(diagnostics) == 2
+    assert "HTTP readiness probe was inconclusive" in captured.err
+    assert "Proxy did not pass HTTP readiness" not in captured.err

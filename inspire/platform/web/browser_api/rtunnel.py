@@ -498,6 +498,11 @@ def _is_rtunnel_proxy_ready(*, status: int, body: str) -> bool:
     return False
 
 
+def _is_plain_text_404_response(*, status: int, body: str) -> bool:
+    text = (body or "").strip().lower()
+    return status == 404 and "page not found" in text and "<html" not in text
+
+
 _TOKEN_QUERY_RE = re.compile(r"(?i)(token=)[^\s&'\"]+")
 _TOKEN_PATH_RE = re.compile(r"(/(?:jupyter|vscode)/[^/]+/)([^/]+)(/proxy/)")
 
@@ -520,6 +525,17 @@ def _summarize_request_error(error: Exception) -> str:
     headline = message.splitlines()[0].strip()
     # Avoid Playwright call logs that may include cookies/tokens.
     return _redact_token_like_text(headline)
+
+
+def _diagnostic_is_inconclusive_http_probe(diagnostic: str) -> bool:
+    lowered = str(diagnostic or "").strip().lower()
+    return "plain-text 404" in lowered and "page not found" in lowered
+
+
+def _all_inconclusive_http_probe_diagnostics(diagnostics: list[str]) -> bool:
+    if not diagnostics:
+        return False
+    return all(_diagnostic_is_inconclusive_http_probe(item) for item in diagnostics)
 
 
 def wait_for_rtunnel_reachable(
@@ -555,7 +571,7 @@ def wait_for_rtunnel_reachable(
             except (PlaywrightError, AttributeError, RuntimeError, TypeError, ValueError):
                 body = ""
             last_status = _redact_token_like_text(f"{resp.status} {body[:200].strip()}")
-            if attempt <= 3:
+            if attempt <= 3 and not _is_plain_text_404_response(status=resp.status, body=body):
                 _sys.stderr.write(f"  Attempt {attempt}: {last_status}\n")
                 _sys.stderr.flush()
             if _is_rtunnel_proxy_ready(status=resp.status, body=body):
@@ -564,8 +580,7 @@ def wait_for_rtunnel_reachable(
             # platform gateway and rtunnel's Go HTTP handler return this
             # for non-WebSocket requests.  Either way the HTTP probe
             # will never succeed, so bail out early.
-            text = (body or "").strip().lower()
-            if resp.status == 404 and "page not found" in text and "<html" not in text:
+            if _is_plain_text_404_response(status=resp.status, body=body):
                 consecutive_404 += 1
             else:
                 consecutive_404 = 0
@@ -586,8 +601,8 @@ def wait_for_rtunnel_reachable(
         # propagates to the caller instead of being swallowed.
         if consecutive_404 >= 3 and (time.time() - start) >= 2:
             raise ValueError(
-                f"rtunnel server returned plain-text 404 on {consecutive_404} "
-                f"consecutive attempts ({int(time.time() - start)}s elapsed).\n"
+                f"HTTP readiness probe stayed inconclusive with plain-text 404 on "
+                f"{consecutive_404} consecutive attempts ({int(time.time() - start)}s elapsed).\n"
                 f"Proxy URL: {display_url}\n"
                 f"Last response: {last_status}"
             )
@@ -1792,7 +1807,12 @@ def _ensure_proxy_readiness_with_fallback(
         best_for_ssh = fallback_proxy_url
 
     if not fallback_proxy_url or fallback_proxy_url == proxy_url:
-        _sys.stderr.write("  Proxy did not pass HTTP readiness; continuing with SSH preflight.\n")
+        if _all_inconclusive_http_probe_diagnostics(diagnostics):
+            _sys.stderr.write(
+                "  HTTP readiness probe was inconclusive; continuing with SSH preflight.\n"
+            )
+        else:
+            _sys.stderr.write("  Proxy did not pass HTTP readiness; continuing with SSH preflight.\n")
         _sys.stderr.flush()
         return best_for_ssh, diagnostics
 
@@ -1815,9 +1835,14 @@ def _ensure_proxy_readiness_with_fallback(
         ValueError,
     ) as fallback_error:
         diagnostics.append(f"fallback={_extract_probe_error_summary(fallback_error)}")
-        _sys.stderr.write(
-            "  Fallback proxy did not pass HTTP readiness; " "continuing with SSH preflight.\n"
-        )
+        if _all_inconclusive_http_probe_diagnostics(diagnostics):
+            _sys.stderr.write(
+                "  HTTP readiness probe remained inconclusive; continuing with SSH preflight.\n"
+            )
+        else:
+            _sys.stderr.write(
+                "  Fallback proxy did not pass HTTP readiness; continuing with SSH preflight.\n"
+            )
         _sys.stderr.flush()
         return best_for_ssh, diagnostics
 
@@ -1976,7 +2001,10 @@ def _verify_and_cache_rtunnel_proxy(
         page=page,
     )
     if probe_diagnostics:
-        _sys.stderr.write("  Proxy readiness summary: " + " | ".join(probe_diagnostics) + "\n")
+        if _all_inconclusive_http_probe_diagnostics(probe_diagnostics):
+            _log.debug("HTTP readiness diagnostics: %s", " | ".join(probe_diagnostics))
+        else:
+            _sys.stderr.write("  Proxy readiness summary: " + " | ".join(probe_diagnostics) + "\n")
         _sys.stderr.flush()
     timer.mark("verify_proxy")
 
