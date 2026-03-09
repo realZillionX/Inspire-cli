@@ -19,7 +19,7 @@
   - `job/`: `job_commands.py`, `job_create.py`, `job_logs.py`, `job_deps.py`
   - `notebook/`: `notebook_commands.py`, `notebook_create_flow.py`, `notebook_lookup.py`, `notebook_presenters.py`, `notebook_ssh_flow.py`, `top.py`
   - `project/`: `project_commands.py`
-  - `resources/`: `resources_list.py`, `resources_nodes.py`, `resources_specs.py`, `resources_predict.py`
+  - `resources/`: `resources_list.py`, `resources_nodes.py`, `resources_specs.py`
 - Formatters: `inspire/cli/formatters/human_formatter.py` (human-readable) and `json_formatter.py` (machine-readable).
 - Debug logging helpers live in `inspire/cli/logging_setup.py`.
 - Domain packages (preferred for shared logic used by CLI):
@@ -58,7 +58,6 @@
 - Release process:
   1. `uv run cz bump --patch` (or `--minor` / `--major`) updates `pyproject.toml`, `inspire/__init__.py`, `CHANGELOG.md`, and creates a git tag.
   2. `git push origin main --tags` triggers release validation CI.
-  3. Sync to GitHub public with the existing file-copy process (see `CLAUDE.md`).
 - New clones should run `uv run pre-commit install` to install hooks.
 - Manual dependency update: `uv lock --upgrade`.
 
@@ -103,10 +102,10 @@
 - `inspire config check` now validates placeholder hosts, required credentials, required Docker registry, and API authentication in one pass.
 - Never commit credentials/tokens. Prefer local env exports or local config; run `inspire config check` to validate setup.
 
-## Public Sync & Ignore Policy
-- Treat `.gitignore` as the source of truth for non-public/internal artifacts.
+## Ignore Policy
+- Treat `.gitignore` as the source of truth for ignored/private artifacts.
 - Paths currently ignored/internal include `.inspire/`, `internal/`, most of `scripts/` (except tracked `scripts/bootstrap_inspire_env.sh`), `API_ENDPOINTS.md`, `CLAUDE.md`, `config.toml.example`, `inspire/Inspire_OpenAPI_Reference.md`, `docs/rtunnel-ssh-setup.md`, and `.playwright-cli/`.
-- When preparing `github-public` sync, avoid introducing dependencies on ignored paths in docs, examples, tests, or command instructions.
+- Avoid introducing dependencies on ignored paths in docs, examples, tests, or command instructions.
 
 ## Current Runtime Notes (Keep In Sync With Code)
 - `inspire resources specs` is the canonical preflight for **notebook** spec discovery; it emits `logic_compute_group_id`, `spec_id`, CPU/memory/GPU fields, and workspace binding. **HPC tasks use a separate `quota_id`** (not the same `spec_id`); obtain it from an existing HPC job via `inspire --json hpc status <job_id>` → `slurm_cluster_spec.predef_quota_id` or `resource_spec_price.quota_id`.

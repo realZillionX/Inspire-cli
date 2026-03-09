@@ -11,9 +11,9 @@ Inspire CLI is a command-line tool for the Inspire HPC platform:
 - Launch and SSH into notebook sessions
 - Inspect GPU/node availability
 
-## Public Sync Scope (.gitignore)
+## Ignore Boundaries (.gitignore)
 
-Treat `.gitignore` as the source of truth for public-sync boundaries.
+Treat `.gitignore` as the source of truth for ignored/private boundaries.
 
 Ignored/internal paths currently include:
 - `.inspire/`
@@ -24,7 +24,7 @@ Ignored/internal paths currently include:
 - `config.toml.example`
 - `docs/rtunnel-ssh-setup.md`
 
-When preparing `github-public` sync, avoid adding docs/tests/examples that depend on ignored files.
+Avoid adding docs/tests/examples that depend on ignored files.
 
 ## Architecture (Current)
 
@@ -182,4 +182,4 @@ def my_command(ctx: Context) -> None:
 
 - Keep reusable logic out of CLI-only `_impl` paths when possible.
 - Prefer `inspire/config`, `inspire/platform`, and `inspire/bridge` for shared logic.
-- For public syncs, double-check changes against `.gitignore` before pushing.
+- Before pushing, double-check changes against `.gitignore`.

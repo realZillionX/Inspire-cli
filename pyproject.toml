@@ -45,8 +45,8 @@ dev = [
 inspire = "inspire.cli.main:cli"
 
 [project.urls]
-Documentation = "https://gitea.com/cyteena/inspire-cli"
-Repository = "https://gitea.com/cyteena/inspire-cli"
+Documentation = "https://github.com/realZillionX/Inspire-cli"
+Repository = "https://github.com/realZillionX/Inspire-cli"
 
 [tool.setuptools]
 packages = {find = {where = ["."], include = ["inspire*"], exclude = ["tests*"]}}
