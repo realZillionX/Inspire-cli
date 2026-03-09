@@ -21,12 +21,14 @@ except ImportError:  # pragma: no cover - Playwright may be unavailable in some 
         pass
 
 
+from inspire.config.rtunnel_defaults import (
+    rtunnel_download_url_shell_snippet,
+)
 from inspire.config.ssh_runtime import (
     DEFAULT_RTUNNEL_DOWNLOAD_URL,
     SshRuntimeConfig,
     resolve_ssh_runtime_config,
 )
-from inspire.config.rtunnel_defaults import rtunnel_download_url_shell_snippet
 from inspire.platform.web.browser_api.core import (
     _browser_api_path,
     _get_base_url,

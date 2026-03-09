@@ -57,4 +57,3 @@ def rtunnel_download_url_shell_snippet() -> str:
 
 
 __all__ = ["RTUNNEL_RELEASE_BASE_URL", "default_rtunnel_download_url", "rtunnel_download_url_shell_snippet"]
-
