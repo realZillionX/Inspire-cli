@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.6 (2026-03-09)
+
+### Fix
+
+- remove duplicate rtunnel helper and align release docs
+
 ## v0.2.5 (2026-03-09)
 
 ### Breaking Changes
