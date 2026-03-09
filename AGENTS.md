@@ -56,7 +56,7 @@
 - Release workflow triggers on `v*` tag push and validates version consistency across `pyproject.toml`, `inspire/__init__.py`, and the git tag.
 - Dependency checks run weekly (Monday 09:00 UTC) via `deps-check`.
 - Release process:
-  1. `uv run cz bump --patch` (or `--minor` / `--major`) updates `pyproject.toml`, `inspire/__init__.py`, `CHANGELOG.md`, and creates a git tag.
+  1. `uv run cz bump --increment PATCH` (or `MINOR` / `MAJOR`) updates `pyproject.toml`, `inspire/__init__.py`, `CHANGELOG.md`, and creates a git tag.
   2. `git push origin main --tags` triggers release validation CI.
 - New clones should run `uv run pre-commit install` to install hooks.
 - Manual dependency update: `uv lock --upgrade`.
@@ -128,7 +128,7 @@
 - HTTP proxy readiness checks can still report transient failures (`404`, `ECONNREFUSED`) even when SSH succeeds. Treat HTTP probe as advisory; use SSH preflight (`inspire tunnel test`) as authoritative.
 - rtunnel proxy state is cached per account under `~/.cache/inspire-cli/rtunnel-proxy-state*.json` with TTL-based reuse.
 - Set `INSPIRE_RTUNNEL_TIMING=1` to enable per-step timing output in `_setup_notebook_rtunnel_sync()`.
-- `inspire init --discover` now collects projects across discovered workspaces, not only the current workspace. Global per-account catalog data is persisted only when discovery actually spans multiple workspaces; project-level config remains the canonical place for workspace aliases and compute-group catalogs.
+- `inspire init --discover` now collects projects across discovered workspaces, not only the current workspace. Global per-account catalog data is persisted only when discovery actually spans multiple workspaces; project-level config remains the canonical place for workspace mappings using the platform's actual workspace names and for compute-group catalogs.
 - Notebook post-start actions are now first-class. Use `notebook.post_start` / `INSPIRE_NOTEBOOK_POST_START`, `--post-start`, or `--post-start-script`; the old keepalive preset is removed, and `none` is the supported way to disable a configured default.
 - Keep tracked tests/docs free of credentials, tokens, and private endpoint values.
 - `inspire init` probe controls (`--probe-limit`, `--probe-keep-notebooks`, `--probe-pubkey`/`--pubkey`, `--probe-timeout`) are only effective with `--discover --probe-shared-path`; otherwise they are accepted but ignored.

@@ -34,7 +34,7 @@
 - CPU notebook compute-group selection now prefers `CPU资源-2` and `HPC-可上网区资源-2` when `gpu_count == 0`, avoiding accidental binding to generic `CPU资源`.
 - Job subcommands (`list/status/stop/wait/update/command`) now load layered config from files and env vars (instead of env-only), aligning runtime behavior with other command groups.
 - Layered config now consistently resolves the effective global config path through `INSPIRE_GLOBAL_CONFIG_PATH`, and account-scoped passwords override legacy `[auth].password` when both are present.
-- `inspire init --discover` now discovers projects across all visible workspaces instead of only the current workspace, while keeping project-level config as the canonical home for workspace aliases and compute-group catalogs.
+- `inspire init --discover` now discovers projects across all visible workspaces instead of only the current workspace, while keeping project-level config as the canonical home for workspace mappings using the platform's actual workspace names and for compute-group catalogs.
 
 ### Docs
 
