@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import shlex
 import time
+import uuid
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
@@ -15,6 +17,8 @@ from inspire.platform.web.browser_api.core import (
     _run_in_thread,
 )
 from inspire.platform.web.session import WebSession, get_web_session
+
+COMMAND_COMPLETION_MARKER_PREFIX = "INSPIRE_NOTEBOOK_COMMAND_DONE_"
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +182,56 @@ def _send_command_via_terminal_ws(
         _delete_terminal_via_api(context, lab_url=lab_frame.url, term_name=term_name)
 
 
+def _default_completion_marker() -> str:
+    return f"{COMMAND_COMPLETION_MARKER_PREFIX}{uuid.uuid4().hex}"
+
+
+def _wrap_command_for_completion(command: str, completion_marker: str) -> str:
+    inner = (
+        f"{command}; "
+        f"status=$?; "
+        f"printf '\\n%s\\n' {shlex.quote(completion_marker)}; "
+        "exit $status"
+    )
+    return f"bash -lc {shlex.quote(inner)}"
+
+
+def _wait_for_completion_marker(
+    lab_frame,  # noqa: ANN001
+    *,
+    completion_marker: str,
+    timeout_ms: int,
+) -> bool:
+    deadline = time.time() + max(timeout_ms, 1000) / 1000.0
+    while time.time() < deadline:
+        try:
+            found = lab_frame.evaluate(
+                """
+                marker => {
+                  const texts = [];
+                  for (const selector of ['.xterm-screen', '.xterm-rows', '.jp-Terminal', 'body']) {
+                    for (const node of document.querySelectorAll(selector)) {
+                      texts.push(node.innerText || node.textContent || '');
+                    }
+                  }
+                  return texts.join('\\n').includes(marker);
+                }
+                """,
+                completion_marker,
+            )
+            if found:
+                return True
+        except Exception:
+            pass
+
+        try:
+            lab_frame.wait_for_timeout(250)
+        except Exception:
+            time.sleep(0.25)
+
+    return False
+
+
 def run_command_in_notebook(
     notebook_id: str,
     command: str,
@@ -228,6 +282,11 @@ def _run_command_in_notebook_sync(
     if session is None:
         session = get_web_session()
 
+    effective_marker = completion_marker or _default_completion_marker()
+    wrapped_command = (
+        command if completion_marker else _wrap_command_for_completion(command, effective_marker)
+    )
+
     _sys.stderr.write("Running command in notebook terminal...\n")
     _sys.stderr.flush()
 
@@ -248,9 +307,9 @@ def _run_command_in_notebook_sync(
             if _send_command_via_terminal_ws(
                 context=context,
                 lab_frame=lab_frame,
-                command=command,
+                command=wrapped_command,
                 timeout_ms=timeout_ms,
-                completion_marker=completion_marker,
+                completion_marker=effective_marker,
             ):
                 return True
 
@@ -261,10 +320,13 @@ def _run_command_in_notebook_sync(
             if not _focus_terminal_input(lab_frame, page):
                 raise ValueError("Failed to focus Jupyter terminal input")
 
-            page.keyboard.insert_text(command)
+            page.keyboard.insert_text(wrapped_command)
             page.keyboard.press("Enter")
-            page.wait_for_timeout(min(timeout_ms, 1000))
-            return True
+            return _wait_for_completion_marker(
+                lab_frame,
+                completion_marker=effective_marker,
+                timeout_ms=timeout_ms,
+            )
 
         finally:
             try:

@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 from typing import Any, Optional
 
 import pytest
@@ -8,7 +9,13 @@ from inspire import config as config_module
 from inspire.bridge import tunnel as tunnel_module
 from inspire.cli.commands.notebook import notebook_commands as notebook_cmd_module
 from inspire.cli.commands.notebook import notebook_ssh_flow as ssh_flow_module
-from inspire.cli.context import Context, EXIT_API_ERROR, EXIT_CONFIG_ERROR, EXIT_SUCCESS
+from inspire.cli.context import (
+    Context,
+    EXIT_API_ERROR,
+    EXIT_CONFIG_ERROR,
+    EXIT_SUCCESS,
+    EXIT_TIMEOUT,
+)
 from inspire.cli.main import main as cli_main
 from inspire.config.ssh_runtime import SshRuntimeConfig
 from inspire.platform.web import browser_api as browser_api_module
@@ -934,6 +941,253 @@ def test_run_notebook_ssh_interactive_reconnects_after_drop(
     assert reconnect_calls["rebuild"] == 1
 
 
+def test_run_notebook_ssh_command_uses_non_interactive_executor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeSession:
+        workspace_id = "ws-test"
+        storage_state = {}
+
+    class FakeTunnelConfig:
+        def __init__(self) -> None:
+            self.bridges: dict[str, object] = {}
+            self.default_bridge = None
+
+        def add_bridge(self, profile: object) -> None:
+            name = str(getattr(profile, "name", "default"))
+            self.bridges[name] = profile
+            if self.default_bridge is None:
+                self.default_bridge = name
+
+        def get_bridge(self, name: Optional[str] = None) -> object | None:
+            if name:
+                return self.bridges.get(name)
+            if self.default_bridge:
+                return self.bridges.get(self.default_bridge)
+            return None
+
+    fake_tunnel_config = FakeTunnelConfig()
+    fake_tunnel_config.add_bridge(
+        tunnel_module.BridgeProfile(
+            name="notebook-notebook",
+            proxy_url="wss://proxy.example/notebook/",
+            notebook_id="notebook-12345678",
+        )
+    )
+    streamed: dict[str, object] = {}
+
+    monkeypatch.setattr(ssh_flow_module, "require_web_session", lambda ctx, hint: FakeSession())
+    monkeypatch.setattr(ssh_flow_module, "load_config", lambda ctx: make_test_config(tmp_path))
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_resolve_notebook_id",
+        lambda *args, **kwargs: ("notebook-12345678", None),
+    )
+    monkeypatch.setattr(
+        browser_api_module,
+        "wait_for_notebook_running",
+        lambda notebook_id, session=None: {
+            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}}
+        },
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_get_current_user_detail",
+        lambda session, base_url: {"id": "user-1", "username": "user"},
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_validate_notebook_account_access",
+        lambda current_user, notebook_detail: (True, ""),
+    )
+    monkeypatch.setattr(
+        tunnel_module, "load_tunnel_config", lambda account=None: fake_tunnel_config
+    )
+    monkeypatch.setattr(tunnel_module, "has_internet_for_gpu_type", lambda gpu_type: False)
+    monkeypatch.setattr(
+        tunnel_module,
+        "get_ssh_command_args",
+        lambda bridge_name, config, remote_command=None: ["ssh", "root@localhost"],
+    )
+    monkeypatch.setattr(
+        tunnel_module,
+        "run_ssh_command_streaming",
+        lambda command, bridge_name=None, config=None, timeout=None, output_callback=None: (
+            streamed.update(
+                {
+                    "command": command,
+                    "bridge_name": bridge_name,
+                    "config": config,
+                    "timeout": timeout,
+                }
+            )
+            or 0
+        ),
+    )
+    monkeypatch.setattr(
+        browser_api_module,
+        "setup_notebook_rtunnel",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    monkeypatch.setattr(
+        ssh_flow_module.subprocess,
+        "run",
+        lambda args, capture_output, timeout, text: subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="ok\n",
+            stderr="",
+        ),
+    )
+
+    ssh_flow_module.run_notebook_ssh(
+        Context(),
+        notebook_id="nb-name",
+        wait=True,
+        pubkey=None,
+        save_as=None,
+        port=31337,
+        ssh_port=22222,
+        command="git status",
+        rtunnel_bin=None,
+        debug_playwright=False,
+        setup_timeout=60,
+    )
+
+    assert streamed["command"] == "git status"
+    assert streamed["bridge_name"] == "notebook-notebook"
+    assert streamed["config"] is fake_tunnel_config
+    assert streamed["timeout"] == 300
+
+
+def test_run_notebook_ssh_command_timeout_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeSession:
+        workspace_id = "ws-test"
+        storage_state = {}
+
+    class FakeTunnelConfig:
+        def __init__(self) -> None:
+            self.bridges: dict[str, object] = {}
+            self.default_bridge = None
+
+        def add_bridge(self, profile: object) -> None:
+            name = str(getattr(profile, "name", "default"))
+            self.bridges[name] = profile
+            if self.default_bridge is None:
+                self.default_bridge = name
+
+        def get_bridge(self, name: Optional[str] = None) -> object | None:
+            if name:
+                return self.bridges.get(name)
+            if self.default_bridge:
+                return self.bridges.get(self.default_bridge)
+            return None
+
+    fake_tunnel_config = FakeTunnelConfig()
+    fake_tunnel_config.add_bridge(
+        tunnel_module.BridgeProfile(
+            name="notebook-notebook",
+            proxy_url="wss://proxy.example/notebook/",
+            notebook_id="notebook-12345678",
+        )
+    )
+    captured: dict[str, str] = {}
+
+    def fake_handle_error(
+        ctx: Context,
+        error_type: str,
+        message: str,
+        exit_code: int,
+        *,
+        hint: Optional[str] = None,
+    ) -> None:
+        assert ctx is not None
+        captured["type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(ssh_flow_module, "_handle_error", fake_handle_error)
+    monkeypatch.setattr(ssh_flow_module, "require_web_session", lambda ctx, hint: FakeSession())
+    monkeypatch.setattr(ssh_flow_module, "load_config", lambda ctx: make_test_config(tmp_path))
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_resolve_notebook_id",
+        lambda *args, **kwargs: ("notebook-12345678", None),
+    )
+    monkeypatch.setattr(
+        browser_api_module,
+        "wait_for_notebook_running",
+        lambda notebook_id, session=None: {
+            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}}
+        },
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_get_current_user_detail",
+        lambda session, base_url: {"id": "user-1", "username": "user"},
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_validate_notebook_account_access",
+        lambda current_user, notebook_detail: (True, ""),
+    )
+    monkeypatch.setattr(
+        tunnel_module, "load_tunnel_config", lambda account=None: fake_tunnel_config
+    )
+    monkeypatch.setattr(tunnel_module, "has_internet_for_gpu_type", lambda gpu_type: False)
+    monkeypatch.setattr(
+        tunnel_module,
+        "get_ssh_command_args",
+        lambda bridge_name, config, remote_command=None: ["ssh", "root@localhost"],
+    )
+    monkeypatch.setattr(
+        tunnel_module,
+        "run_ssh_command_streaming",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(cmd="ssh", timeout=5)
+        ),
+    )
+    monkeypatch.setattr(
+        browser_api_module,
+        "setup_notebook_rtunnel",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    monkeypatch.setattr(
+        ssh_flow_module.subprocess,
+        "run",
+        lambda args, capture_output, timeout, text: subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="ok\n",
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        ssh_flow_module.run_notebook_ssh(
+            Context(),
+            notebook_id="nb-name",
+            wait=True,
+            pubkey=None,
+            save_as=None,
+            port=31337,
+            ssh_port=22222,
+            command="git pull",
+            command_timeout=5,
+            rtunnel_bin=None,
+            debug_playwright=False,
+            setup_timeout=60,
+        )
+
+    assert exc.value.code == EXIT_TIMEOUT
+    assert captured["type"] == "Timeout"
+    assert "timed out after 5s" in captured["message"]
+    assert "--command-timeout" in captured["hint"]
+
+
 def test_run_notebook_ssh_reports_when_tunnel_not_ready(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1018,12 +1272,6 @@ def test_run_notebook_ssh_reports_when_tunnel_not_ready(
         "get_ssh_command_args",
         lambda bridge_name, config, remote_command=None: ["ssh", "root@localhost"],
     )
-    monkeypatch.setattr(
-        ssh_flow_module.os,
-        "execvp",
-        lambda file, args: (_ for _ in ()).throw(AssertionError("execvp should not run")),
-    )
-
     with pytest.raises(SystemExit) as exc:
         ssh_flow_module.run_notebook_ssh(
             Context(),

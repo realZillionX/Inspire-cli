@@ -245,6 +245,40 @@ def test_browser_client_reset_on_expired(monkeypatch: pytest.MonkeyPatch):
     assert closed["called"] is True
 
 
+def test_request_json_reauth_is_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    session = WebSession(
+        storage_state={"cookies": [{"name": "session", "value": "abc"}]},
+        cookies={"session": "abc"},
+        workspace_id="ws-test",
+        created_at=0,
+    )
+    refreshed = WebSession(
+        storage_state={"cookies": [{"name": "session", "value": "new"}]},
+        cookies={"session": "new"},
+        workspace_id="ws-test",
+        created_at=1,
+    )
+
+    class ExpiringBrowserClient:
+        def request_json(self, *_args, **_kwargs):
+            raise ws.SessionExpiredError("expired")
+
+    monkeypatch.setattr(ws, "_get_browser_client", lambda _session: ExpiringBrowserClient())
+    monkeypatch.setattr(ws, "_close_browser_client", lambda: None)
+    monkeypatch.setattr(ws, "_BROWSER_API_FORCE_BROWSER", True)
+    monkeypatch.setattr(ws, "clear_session_cache", lambda: None)
+    monkeypatch.setattr(ws, "get_web_session", lambda **_kwargs: refreshed)
+
+    with pytest.raises(ws.SessionExpiredError):
+        ws.request_json(session, "GET", "https://example.test")
+
+    captured = capsys.readouterr()
+    assert "Session expired, re-authenticating..." not in captured.err
+
+
 def test_request_json_reauth_refreshes_session_in_place(monkeypatch: pytest.MonkeyPatch):
     session = WebSession(
         storage_state={"cookies": [{"name": "session", "value": "old"}]},

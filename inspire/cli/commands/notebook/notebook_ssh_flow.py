@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import time
 from typing import Optional
@@ -12,9 +11,11 @@ from urllib import request as urllib_request
 
 import click
 
-from inspire.cli.context import Context, EXIT_API_ERROR, EXIT_CONFIG_ERROR
+from inspire.cli.context import Context, EXIT_API_ERROR, EXIT_CONFIG_ERROR, EXIT_TIMEOUT
+from inspire.cli.formatters import json_formatter
 from inspire.cli.utils.errors import exit_with_error as _handle_error
 from inspire.cli.utils.notebook_cli import get_base_url, load_config, require_web_session
+from inspire.cli.utils.output import emit_success as emit_output_success
 from inspire.cli.utils.tunnel_reconnect import (
     NotebookBridgeReconnectState,
     NotebookBridgeReconnectStatus,
@@ -67,6 +68,234 @@ def _describe_proxy_http_status(proxy_url: str, timeout_s: float = 4.0) -> str:
 
 def load_ssh_public_key(pubkey_path: Optional[str] = None) -> str:
     return load_ssh_public_key_material(pubkey_path)
+
+
+def _command_timeout_seconds(command_timeout: Optional[int]) -> Optional[int]:
+    if command_timeout is None:
+        return 300
+    if int(command_timeout) <= 0:
+        return None
+    return int(command_timeout)
+
+
+def _should_retry_non_interactive_disconnect(
+    *,
+    returncode: int,
+    profile_name: str,
+    tunnel_account: Optional[str],
+) -> bool:
+    from inspire.bridge.tunnel import is_tunnel_available, load_tunnel_config
+
+    if not should_attempt_ssh_reconnect(
+        returncode,
+        interactive=False,
+        allow_non_interactive=True,
+    ):
+        return False
+
+    try:
+        tunnel_config = load_tunnel_config(account=tunnel_account)
+        tunnel_ready = is_tunnel_available(
+            bridge_name=profile_name,
+            config=tunnel_config,
+            retries=0,
+            retry_pause=0.0,
+            progressive=False,
+        )
+    except Exception:
+        return False
+
+    return not tunnel_ready
+
+
+def _run_notebook_command_with_reconnect(
+    ctx: Context,
+    *,
+    profile_name: str,
+    tunnel_account: Optional[str],
+    session,
+    pubkey: Optional[str],
+    rtunnel_bin: Optional[str],
+    command: str,
+    command_timeout: Optional[int],
+    debug_playwright: bool,
+    setup_timeout: int,
+    tunnel_retries: int,
+    tunnel_retry_pause: float,
+) -> None:
+    from inspire.bridge.tunnel import (
+        load_tunnel_config,
+        run_ssh_command,
+        run_ssh_command_streaming,
+    )
+
+    reconnect_limit = max(0, int(tunnel_retries))
+    reconnect_state = NotebookBridgeReconnectState(
+        reconnect_limit=reconnect_limit,
+        reconnect_pause=tunnel_retry_pause,
+    )
+    timeout_s = _command_timeout_seconds(command_timeout)
+
+    def _runtime_loader() -> object:
+        return resolve_ssh_runtime_config(
+            cli_overrides={"rtunnel_bin": rtunnel_bin},
+        )
+
+    def _attempt_rebuild() -> bool:
+        tunnel_config = load_tunnel_config(account=tunnel_account)
+        bridge = tunnel_config.get_bridge(profile_name)
+        if bridge is None:
+            _handle_error(
+                ctx,
+                "ConfigError",
+                f"Bridge profile '{profile_name}' not found.",
+                EXIT_CONFIG_ERROR,
+                hint="Run 'inspire tunnel list' to check saved bridge profiles.",
+            )
+            return False
+
+        attempt = reconnect_state.reconnect_attempt + 1
+        click.echo(
+            (
+                "SSH connection dropped; rebuilding tunnel automatically "
+                f"(attempt {attempt}/{reconnect_limit})..."
+            ),
+            err=True,
+        )
+
+        reconnect_result = attempt_notebook_bridge_rebuild(
+            state=reconnect_state,
+            bridge_name=profile_name,
+            bridge=bridge,
+            tunnel_config=tunnel_config,
+            session_loader=lambda: session,
+            runtime_loader=_runtime_loader,
+            rebuild_fn=rebuild_notebook_bridge_profile,
+            key_loader=lambda path: load_ssh_public_key(path),
+            pubkey_path=pubkey,
+            timeout=setup_timeout,
+            headless=not debug_playwright,
+        )
+
+        if reconnect_result.status is NotebookBridgeReconnectStatus.REBUILT:
+            return True
+
+        if reconnect_result.status is NotebookBridgeReconnectStatus.RETRY_LATER:
+            if reconnect_result.pause_seconds > 0:
+                time.sleep(reconnect_result.pause_seconds)
+            return True
+
+        if reconnect_result.status is NotebookBridgeReconnectStatus.NOT_REBUILDABLE:
+            _handle_error(
+                ctx,
+                "ConfigError",
+                f"Bridge profile '{profile_name}' is missing notebook metadata.",
+                EXIT_CONFIG_ERROR,
+                hint="Re-run 'inspire notebook ssh <notebook-id> --save-as <name>'.",
+            )
+            return False
+
+        if isinstance(reconnect_result.error, (ValueError, ConfigError)):
+            _handle_error(
+                ctx,
+                "ConfigError",
+                str(reconnect_result.error),
+                EXIT_CONFIG_ERROR,
+            )
+            return False
+
+        _handle_error(
+            ctx,
+            "APIError",
+            (
+                f"Failed to rebuild notebook tunnel after disconnect: {reconnect_result.error}"
+                if reconnect_result.error
+                else "SSH connection dropped and auto-reconnect retries were exhausted."
+            ),
+            EXIT_API_ERROR,
+            hint="Re-run 'inspire notebook ssh <notebook-id>' to refresh the tunnel.",
+        )
+        return False
+
+    while True:
+        tunnel_config = load_tunnel_config(account=tunnel_account)
+
+        try:
+            if ctx.json_output:
+                result = run_ssh_command(
+                    command=command,
+                    bridge_name=profile_name,
+                    config=tunnel_config,
+                    timeout=timeout_s,
+                    capture_output=True,
+                )
+                output = f"{result.stdout or ''}{result.stderr or ''}"
+                if result.returncode == 0:
+                    emit_output_success(
+                        ctx,
+                        payload={
+                            "status": "success",
+                            "method": "ssh_tunnel",
+                            "returncode": result.returncode,
+                            "output": output,
+                        },
+                    )
+                    return
+
+                if _should_retry_non_interactive_disconnect(
+                    returncode=result.returncode,
+                    profile_name=profile_name,
+                    tunnel_account=tunnel_account,
+                ):
+                    if _attempt_rebuild():
+                        continue
+                    return
+
+                click.echo(
+                    json_formatter.format_json(
+                        {
+                            "status": "failed",
+                            "method": "ssh_tunnel",
+                            "returncode": result.returncode,
+                            "output": output,
+                        },
+                        success=False,
+                    )
+                )
+                raise SystemExit(result.returncode)
+
+            exit_code = run_ssh_command_streaming(
+                command=command,
+                bridge_name=profile_name,
+                config=tunnel_config,
+                timeout=timeout_s,
+            )
+            if exit_code == 0:
+                return
+
+            if _should_retry_non_interactive_disconnect(
+                returncode=exit_code,
+                profile_name=profile_name,
+                tunnel_account=tunnel_account,
+            ):
+                if _attempt_rebuild():
+                    continue
+                return
+
+            raise SystemExit(exit_code)
+        except subprocess.TimeoutExpired:
+            timeout_label = timeout_s if timeout_s is not None else "configured"
+            _handle_error(
+                ctx,
+                "Timeout",
+                f"Command timed out after {timeout_label}s.",
+                EXIT_TIMEOUT,
+                hint=(
+                    "Retry with '--command-timeout <seconds>' for a longer limit, "
+                    "or use '--command-timeout 0' to disable the limit."
+                ),
+            )
+            return
 
 
 def _run_interactive_notebook_ssh_with_reconnect(
@@ -246,6 +475,7 @@ def run_notebook_ssh(
     port: int,
     ssh_port: int,
     command: Optional[str],
+    command_timeout: Optional[int] = None,
     rtunnel_bin: Optional[str],
     debug_playwright: bool,
     setup_timeout: int,
@@ -376,12 +606,20 @@ def run_notebook_ssh(
                             tunnel_retry_pause=config.tunnel_retry_pause,
                         )
                         return
-                    args = get_ssh_command_args(
-                        bridge_name=profile_name,
-                        config=cached_config,
-                        remote_command=command,
+                    _run_notebook_command_with_reconnect(
+                        ctx,
+                        profile_name=profile_name,
+                        tunnel_account=tunnel_account,
+                        session=session,
+                        pubkey=pubkey,
+                        rtunnel_bin=rtunnel_bin,
+                        command=command,
+                        command_timeout=command_timeout,
+                        debug_playwright=debug_playwright,
+                        setup_timeout=setup_timeout,
+                        tunnel_retries=config.tunnel_retries,
+                        tunnel_retry_pause=config.tunnel_retry_pause,
                     )
-                    os.execvp("ssh", args)
                     return
             except (subprocess.TimeoutExpired, Exception):
                 pass
@@ -500,12 +738,20 @@ def run_notebook_ssh(
         )
         return
 
-    args = get_ssh_command_args(
-        bridge_name=profile_name,
-        config=tunnel_config,
-        remote_command=command,
+    _run_notebook_command_with_reconnect(
+        ctx,
+        profile_name=profile_name,
+        tunnel_account=tunnel_account,
+        session=session,
+        pubkey=pubkey,
+        rtunnel_bin=rtunnel_bin,
+        command=command,
+        command_timeout=command_timeout,
+        debug_playwright=debug_playwright,
+        setup_timeout=setup_timeout,
+        tunnel_retries=config.tunnel_retries,
+        tunnel_retry_pause=config.tunnel_retry_pause,
     )
-    os.execvp("ssh", args)
 
 
 __all__ = ["load_ssh_public_key", "run_notebook_ssh"]

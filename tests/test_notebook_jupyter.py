@@ -142,8 +142,21 @@ def test_run_command_in_notebook_sync_falls_back_to_browser_terminal(monkeypatch
     class _Frame:
         url = "https://nb.example.com/lab"
 
+        def __init__(self) -> None:
+            self.marker_checks = 0
+
         def locator(self, _selector: str) -> _LoadingLocator:
             return _LoadingLocator()
+
+        def evaluate(self, _script: str, marker: str) -> bool:
+            self.marker_checks += 1
+            return (
+                marker.startswith(notebooks_module.COMMAND_COMPLETION_MARKER_PREFIX)
+                and self.marker_checks >= 2
+            )
+
+        def wait_for_timeout(self, timeout_ms: int) -> None:
+            waits.append(timeout_ms)
 
     class _Keyboard:
         def __init__(self) -> None:
@@ -218,8 +231,10 @@ def test_run_command_in_notebook_sync_falls_back_to_browser_terminal(monkeypatch
         )
         is True
     )
-    assert page.keyboard.inserted == ["echo hi"]
+    assert len(page.keyboard.inserted) == 1
+    assert "echo hi" in page.keyboard.inserted[0]
+    assert notebooks_module.COMMAND_COMPLETION_MARKER_PREFIX in page.keyboard.inserted[0]
     assert page.keyboard.pressed == ["Enter"]
-    assert waits == [1000]
+    assert waits == [250]
     assert context.closed is True
     assert browser.closed is True

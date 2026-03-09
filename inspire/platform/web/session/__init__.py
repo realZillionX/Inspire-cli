@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import logging
 from typing import Callable, Optional
 
 import requests as requests_lib
@@ -54,6 +55,7 @@ __all__ = [
 
 
 _BROWSER_API_FORCE_BROWSER = False
+logger = logging.getLogger(__name__)
 
 
 atexit.register(_close_browser_client)
@@ -143,10 +145,7 @@ def request_json(
         _close_browser_client()
         # Auto-retry once with fresh session
         if _retry_count < 1:
-            import sys
-
-            sys.stderr.write("Session expired, re-authenticating...\n")
-            sys.stderr.flush()
+            logger.debug("Web session expired; refreshing cached session.")
             clear_session_cache()
             new_session = get_web_session(force_refresh=True)
             _refresh_session_in_place(session, new_session)

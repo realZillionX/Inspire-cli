@@ -2369,11 +2369,6 @@ def test_run_notebook_ssh_reports_when_tunnel_not_ready(
         "get_ssh_command_args",
         lambda bridge_name, config, remote_command=None: ["ssh", "root@localhost"],
     )
-    monkeypatch.setattr(
-        notebook_cmd_module.os,
-        "execvp",
-        lambda file, args: (_ for _ in ()).throw(AssertionError("execvp should not run")),
-    )
 
     with pytest.raises(SystemExit) as exc:
         notebook_cmd_module.run_notebook_ssh(

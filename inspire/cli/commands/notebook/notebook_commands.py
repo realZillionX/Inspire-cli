@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import subprocess
 from typing import Optional
@@ -85,7 +84,6 @@ def _notebook_ssh_overrides() -> dict[str, object]:
         "load_ssh_public_key": load_ssh_public_key,
         "resolve_ssh_runtime_config": resolve_ssh_runtime_config,
         "rebuild_notebook_bridge_profile": rebuild_notebook_bridge_profile,
-        "os": os,
         "subprocess": subprocess,
     }
 
@@ -792,7 +790,16 @@ def list_notebooks(
 )
 @click.option(
     "--command",
-    help="Optional remote command to run (if omitted, opens an interactive shell)",
+    help=(
+        "Optional non-interactive remote command to run "
+        "(if omitted, opens an interactive shell)"
+    ),
+)
+@click.option(
+    "--command-timeout",
+    type=int,
+    default=None,
+    help="Timeout in seconds for --command execution (default: 300, 0 disables)",
 )
 @click.option(
     "--rtunnel-bin",
@@ -820,6 +827,7 @@ def ssh_notebook_cmd(
     port: int,
     ssh_port: int,
     command: Optional[str],
+    command_timeout: Optional[int],
     rtunnel_bin: Optional[str],
     debug_playwright: bool,
     setup_timeout: int,
@@ -834,6 +842,7 @@ def ssh_notebook_cmd(
         port=port,
         ssh_port=ssh_port,
         command=command,
+        command_timeout=command_timeout,
         rtunnel_bin=rtunnel_bin,
         debug_playwright=debug_playwright,
         setup_timeout=setup_timeout,
