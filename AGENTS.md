@@ -76,6 +76,33 @@
 - For resource selection changes, run `tests/test_resources_specs_command.py`, `tests/test_cpu_compute_group_fixes.py`, and `tests/test_notebook_create_flow.py`.
 - For notebook command surface or SSH changes, run `tests/test_notebook_commands.py`, `tests/test_notebook_rtunnel_commands.py`, and `tests/test_notebook_post_start.py`.
 - For debug logging changes, run `tests/test_debug_logging.py`.
+- For end-to-end SSH regressions, treat the following as the minimum automated matrix:
+  - `tests/test_notebook_commands.py`
+  - `tests/test_bridge_exec.py`
+  - `tests/test_bridge_scp.py`
+  - `tests/test_ssh_exec.py`
+  - `tests/test_tunnel_reconnect.py`
+  - `tests/test_notebook_rtunnel_flow.py`
+  - `tests/test_notebook_rtunnel_verify.py`
+  - `tests/test_tunnel_sync.py`
+  - `tests/test_web_session.py`
+  - `tests/test_web_session_proxy.py`
+  - `tests/test_notebook_top.py`
+- For live SSH smoke tests on a real notebook-backed bridge, run them serially, not in parallel:
+  1. `inspire tunnel test -b <bridge-name>`
+  2. `inspire bridge exec -b <bridge-name> 'echo bridge-ok && hostname'`
+  3. `inspire bridge scp -b <bridge-name> /tmp/<file> /tmp/<file>`
+  4. `inspire notebook ssh <notebook-id> --command 'echo by-id-ok && hostname'`
+  5. `inspire notebook ssh <notebook-name> --command 'echo by-name-ok && hostname'`
+- When validating `notebook ssh <name>` performance, run the same by-name command twice:
+  - First run may backfill cached `notebook_name` metadata into the saved bridge profile.
+  - Second run should hit the cached name-to-bridge fast path and be in the same latency class as `notebook ssh <id>`.
+- When checking user-reported “SSH hangs”, always distinguish between:
+  - tunnel setup / proxy readiness,
+  - notebook-name lookup over web APIs,
+  - remote command execution,
+  - and non-zero remote exit codes with valid output.
+- For human-facing smoke tests, prefer commands with immediate stdout such as `echo ok && hostname`, and include at least one negative command (for example `grep -c missing ...`) to verify that non-zero exits surface promptly with a clear error message instead of appearing hung.
 
 ## Commit & Pull Request Guidelines
 - Prefer concise, imperative commit subjects. Conventional-commit prefixes are acceptable when useful.

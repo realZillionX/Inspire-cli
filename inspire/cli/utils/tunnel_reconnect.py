@@ -139,6 +139,7 @@ def rebuild_notebook_bridge_profile(
         ssh_port=bridge.ssh_port,
         has_internet=bridge.has_internet,
         notebook_id=notebook_id,
+        notebook_name=bridge.notebook_name,
         rtunnel_port=tunnel_port,
     )
     tunnel_config.add_bridge(updated)

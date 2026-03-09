@@ -34,6 +34,7 @@ from inspire.platform.web.browser_api.rtunnel import redact_proxy_url
 
 from .notebook_lookup import (
     _get_current_user_detail,
+    _looks_like_notebook_id,
     _resolve_notebook_id,
     _validate_notebook_account_access,
 )
@@ -77,6 +78,29 @@ def _command_timeout_seconds(command_timeout: Optional[int]) -> Optional[int]:
     if int(command_timeout) <= 0:
         return None
     return int(command_timeout)
+
+
+def _cached_bridge_for_identifier(
+    *,
+    identifier: str,
+    config,
+):
+    from inspire.bridge.tunnel import load_tunnel_config
+
+    normalized = str(identifier or "").strip()
+    if not normalized:
+        return None, None, None
+    if _looks_like_notebook_id(normalized):
+        return None, None, None
+
+    tunnel_account = str(getattr(config, "username", "") or "").strip() or None
+    tunnel_config = load_tunnel_config(account=tunnel_account)
+    for bridge in tunnel_config.bridges.values():
+        notebook_name = str(getattr(bridge, "notebook_name", "") or "").strip()
+        notebook_id = str(getattr(bridge, "notebook_id", "") or "").strip()
+        if notebook_name and notebook_name == normalized and notebook_id:
+            return bridge, notebook_id, tunnel_account
+    return None, None, tunnel_account
 
 
 def _command_failure_hint(command: str, exit_code: int) -> str | None:
@@ -519,27 +543,34 @@ def run_notebook_ssh(
 
     base_url = get_base_url()
     config = load_config(ctx)
-    tunnel_account = str(getattr(config, "username", "") or "").strip() or None
+    requested_identifier = notebook_id
+    cached_bridge, cached_notebook_id, tunnel_account = _cached_bridge_for_identifier(
+        identifier=notebook_id,
+        config=config,
+    )
 
     if not ctx.json_output:
         click.echo("Resolving notebook target...", err=True)
 
-    notebook_id, _ = _resolve_notebook_id(
-        ctx,
-        session=session,
-        config=config,
-        base_url=base_url,
-        identifier=notebook_id,
-        json_output=False,
-    )
+    if cached_notebook_id:
+        notebook_id = cached_notebook_id
+    else:
+        notebook_id, _ = _resolve_notebook_id(
+            ctx,
+            session=session,
+            config=config,
+            base_url=base_url,
+            identifier=notebook_id,
+            json_output=False,
+        )
 
     profile_name = save_as or f"notebook-{notebook_id[:8]}"
     cached_config = load_tunnel_config(account=tunnel_account)
 
     if profile_name in cached_config.bridges:
         cached_bridge = cached_config.bridges[profile_name]
-        cached_notebook_id = str(getattr(cached_bridge, "notebook_id", "") or "").strip()
-        if cached_notebook_id == notebook_id:
+        bridge_notebook_id = str(getattr(cached_bridge, "notebook_id", "") or "").strip()
+        if bridge_notebook_id == notebook_id:
             test_args = get_ssh_command_args(
                 bridge_name=profile_name,
                 config=cached_config,
@@ -553,6 +584,16 @@ def run_notebook_ssh(
                     text=True,
                 )
                 if result.returncode == 0 and "ok" in result.stdout:
+                    if (
+                        not getattr(cached_bridge, "notebook_name", None)
+                        and not _looks_like_notebook_id(requested_identifier)
+                    ):
+                        cached_bridge.notebook_name = requested_identifier.strip() or None
+                        try:
+                            cached_config.add_bridge(cached_bridge)
+                            save_tunnel_config(cached_config)
+                        except Exception:
+                            pass
                     click.echo("Using cached tunnel connection (fast path).", err=True)
                     if command is None:
                         _run_interactive_notebook_ssh_with_reconnect(
@@ -583,13 +624,13 @@ def run_notebook_ssh(
                         tunnel_retry_pause=config.tunnel_retry_pause,
                     )
                     return
-            except (subprocess.TimeoutExpired, Exception):
+            except subprocess.TimeoutExpired:
                 pass
         else:
-            if cached_notebook_id:
+            if bridge_notebook_id:
                 click.echo(
                     (
-                        f"Bridge profile '{profile_name}' targets notebook '{cached_notebook_id}'; "
+                        f"Bridge profile '{profile_name}' targets notebook '{bridge_notebook_id}'; "
                         f"refreshing tunnel for '{notebook_id}'."
                     ),
                     err=True,
@@ -702,6 +743,7 @@ def run_notebook_ssh(
         ssh_port=ssh_port,
         has_internet=has_internet,
         notebook_id=notebook_id,
+        notebook_name=str(notebook_detail.get("name") or "").strip() or None,
         rtunnel_port=port,
     )
 
