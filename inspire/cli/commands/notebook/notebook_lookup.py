@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 from typing import Any
 
@@ -271,6 +272,59 @@ def _list_notebooks_for_workspace(
     return [item for item in items if isinstance(item, dict)]
 
 
+def _list_notebooks_for_workspaces(
+    session: web_session_module.WebSession,
+    *,
+    base_url: str,
+    workspace_ids: list[str],
+    user_ids: list[str],
+    keyword: str = "",
+    page_size: int = 20,
+    status: list[str] | None = None,
+) -> dict[str, list[dict]]:
+    if not workspace_ids:
+        return {}
+    if len(workspace_ids) == 1:
+        ws_id = workspace_ids[0]
+        return {
+            ws_id: _list_notebooks_for_workspace(
+                session,
+                base_url=base_url,
+                workspace_id=ws_id,
+                user_ids=user_ids,
+                keyword=keyword,
+                page_size=page_size,
+                status=status,
+            )
+        }
+
+    results: dict[str, list[dict]] = {}
+
+    def _fetch(ws_id: str) -> tuple[str, list[dict]]:
+        return (
+            ws_id,
+            _list_notebooks_for_workspace(
+                session,
+                base_url=base_url,
+                workspace_id=ws_id,
+                user_ids=user_ids,
+                keyword=keyword,
+                page_size=page_size,
+                status=status,
+            ),
+        )
+
+    max_workers = min(len(workspace_ids), 4)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {executor.submit(_fetch, ws_id): ws_id for ws_id in workspace_ids}
+        for future in concurrent.futures.as_completed(future_map):
+            ws_id = future_map[future]
+            ws_result_id, items = future.result()
+            results[ws_result_id or ws_id] = items
+
+    return results
+
+
 def _collect_workspace_ids_for_lookup(
     session: web_session_module.WebSession,
     config: Any,
@@ -323,16 +377,17 @@ def _resolve_partial_notebook_id(
     user_ids = _try_get_current_user_ids(session, base_url=base_url)
     nb_matches: list[tuple[str, str]] = []
     seen_ids: set[str] = set()
+    try:
+        workspace_items = _list_notebooks_for_workspaces(
+            session,
+            base_url=base_url,
+            workspace_ids=workspace_ids,
+            user_ids=user_ids,
+        )
+    except Exception:
+        workspace_items = {}
     for ws_id in workspace_ids:
-        try:
-            items = _list_notebooks_for_workspace(
-                session,
-                base_url=base_url,
-                workspace_id=ws_id,
-                user_ids=user_ids,
-            )
-        except Exception:
-            continue
+        items = workspace_items.get(ws_id, [])
         for item in items:
             nid = _notebook_id_from_item(item)
             if not nid or nid in seen_ids:
@@ -399,17 +454,18 @@ def _resolve_notebook_id(
     user_ids: list[str] = []
 
     matches: list[tuple[str, dict]] = []
+    try:
+        workspace_items = _list_notebooks_for_workspaces(
+            session,
+            base_url=base_url,
+            workspace_ids=workspace_ids,
+            user_ids=user_ids,
+            keyword=identifier,
+        )
+    except Exception:
+        workspace_items = {}
     for ws_id in workspace_ids:
-        try:
-            items = _list_notebooks_for_workspace(
-                session,
-                base_url=base_url,
-                workspace_id=ws_id,
-                user_ids=user_ids,
-                keyword=identifier,
-            )
-        except Exception:
-            continue
+        items = workspace_items.get(ws_id, [])
 
         for item in items:
             raw_item_id = str(item.get("id") or "").strip()
