@@ -55,6 +55,7 @@ class WebSession:
     workspace_id: Optional[str] = None
     login_username: Optional[str] = None
     base_url: Optional[str] = None
+    user_detail: Optional[dict[str, Any]] = None
     all_workspace_ids: Optional[list[str]] = None
     all_workspace_names: Optional[dict[str, str]] = None
 
@@ -72,6 +73,7 @@ class WebSession:
             "workspace_id": self.workspace_id,
             "login_username": self.login_username,
             "base_url": self.base_url,
+            "user_detail": self.user_detail,
             "all_workspace_ids": self.all_workspace_ids,
             "all_workspace_names": self.all_workspace_names,
             "created_at": self.created_at,
@@ -90,6 +92,7 @@ class WebSession:
             workspace_id=data.get("workspace_id"),
             login_username=data.get("login_username"),
             base_url=data.get("base_url"),
+            user_detail=data.get("user_detail"),
             all_workspace_ids=data.get("all_workspace_ids"),
             all_workspace_names=data.get("all_workspace_names"),
             created_at=data["created_at"],

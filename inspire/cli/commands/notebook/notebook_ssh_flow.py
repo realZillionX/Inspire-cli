@@ -500,6 +500,11 @@ def run_notebook_ssh(
 
     base_url = get_base_url()
     config = load_config(ctx)
+    tunnel_account = str(getattr(config, "username", "") or "").strip() or None
+
+    if not ctx.json_output:
+        click.echo("Resolving notebook target...", err=True)
+
     notebook_id, _ = _resolve_notebook_id(
         ctx,
         session=session,
@@ -509,68 +514,6 @@ def run_notebook_ssh(
         json_output=False,
     )
 
-    try:
-        if wait:
-            notebook_detail = browser_api_module.wait_for_notebook_running(
-                notebook_id=notebook_id, session=session
-            )
-        else:
-            notebook_detail = browser_api_module.get_notebook_detail(
-                notebook_id=notebook_id, session=session
-            )
-    except NotebookFailedError as e:
-        _handle_error(
-            ctx,
-            "NotebookFailed",
-            f"Notebook failed to start: {e}",
-            EXIT_API_ERROR,
-            hint=e.events or "Check Events tab in web UI for details.",
-        )
-        return
-    except TimeoutError as e:
-        _handle_error(
-            ctx,
-            "Timeout",
-            f"Timed out waiting for notebook to reach RUNNING: {e}",
-            EXIT_API_ERROR,
-        )
-        return
-    except Exception as e:
-        _handle_error(ctx, "APIError", str(e), EXIT_API_ERROR)
-        return
-
-    current_user_detail: dict = {}
-    try:
-        current_user_detail = _get_current_user_detail(session, base_url=base_url)
-    except Exception:
-        current_user_detail = {}
-
-    allowed, reason = _validate_notebook_account_access(
-        current_user=current_user_detail,
-        notebook_detail=notebook_detail,
-    )
-    if not allowed:
-        configured_user = str(getattr(config, "username", "") or "").strip()
-        user_label = configured_user or "current account"
-        _handle_error(
-            ctx,
-            "ConfigError",
-            f"Notebook/account mismatch detected before tunnel setup: {reason}.",
-            EXIT_CONFIG_ERROR,
-            hint=(
-                f"Notebook '{notebook_id}' appears to belong to another account. "
-                f"Switch [auth].username for this project (current: {user_label}) and ensure a "
-                "matching password is available via INSPIRE_PASSWORD or global "
-                '[accounts."<username>"].password.'
-            ),
-        )
-        return
-
-    gpu_info = (notebook_detail.get("resource_spec_price") or {}).get("gpu_info") or {}
-    gpu_type = gpu_info.get("gpu_product_simple", "")
-    has_internet = has_internet_for_gpu_type(gpu_type)
-
-    tunnel_account = str(getattr(config, "username", "") or "").strip() or None
     profile_name = save_as or f"notebook-{notebook_id[:8]}"
     cached_config = load_tunnel_config(account=tunnel_account)
 
@@ -640,6 +583,69 @@ def run_notebook_ssh(
                     ),
                     err=True,
                 )
+
+    if not ctx.json_output:
+        click.echo("Fetching notebook details for tunnel setup...", err=True)
+    try:
+        if wait:
+            notebook_detail = browser_api_module.wait_for_notebook_running(
+                notebook_id=notebook_id, session=session
+            )
+        else:
+            notebook_detail = browser_api_module.get_notebook_detail(
+                notebook_id=notebook_id, session=session
+            )
+    except NotebookFailedError as e:
+        _handle_error(
+            ctx,
+            "NotebookFailed",
+            f"Notebook failed to start: {e}",
+            EXIT_API_ERROR,
+            hint=e.events or "Check Events tab in web UI for details.",
+        )
+        return
+    except TimeoutError as e:
+        _handle_error(
+            ctx,
+            "Timeout",
+            f"Timed out waiting for notebook to reach RUNNING: {e}",
+            EXIT_API_ERROR,
+        )
+        return
+    except Exception as e:
+        _handle_error(ctx, "APIError", str(e), EXIT_API_ERROR)
+        return
+
+    current_user_detail: dict = {}
+    try:
+        current_user_detail = _get_current_user_detail(session, base_url=base_url)
+    except Exception:
+        current_user_detail = {}
+
+    allowed, reason = _validate_notebook_account_access(
+        current_user=current_user_detail,
+        notebook_detail=notebook_detail,
+    )
+    if not allowed:
+        configured_user = str(getattr(config, "username", "") or "").strip()
+        user_label = configured_user or "current account"
+        _handle_error(
+            ctx,
+            "ConfigError",
+            f"Notebook/account mismatch detected before tunnel setup: {reason}.",
+            EXIT_CONFIG_ERROR,
+            hint=(
+                f"Notebook '{notebook_id}' appears to belong to another account. "
+                f"Switch [auth].username for this project (current: {user_label}) and ensure a "
+                "matching password is available via INSPIRE_PASSWORD or global "
+                '[accounts."<username>"].password.'
+            ),
+        )
+        return
+
+    gpu_info = (notebook_detail.get("resource_spec_price") or {}).get("gpu_info") or {}
+    gpu_type = gpu_info.get("gpu_product_simple", "")
+    has_internet = has_internet_for_gpu_type(gpu_type)
 
     try:
         ssh_public_key = load_ssh_public_key(pubkey)

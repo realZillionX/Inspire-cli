@@ -80,6 +80,12 @@ def _try_get_current_user_ids(
     *,
     base_url: str,
 ) -> list[str]:
+    cached_detail = getattr(session, "user_detail", None)
+    if isinstance(cached_detail, dict):
+        user_id = cached_detail.get("id")
+        if user_id:
+            return [str(user_id)]
+
     try:
         user_data = web_session_module.request_json(
             session,
@@ -87,7 +93,14 @@ def _try_get_current_user_ids(
             f"{base_url}/api/v1/user/detail",
             timeout=30,
         )
-        user_id = user_data.get("data", {}).get("id")
+        data = user_data.get("data", {})
+        if isinstance(data, dict):
+            session.user_detail = data
+            try:
+                session.save(account=session.login_username)
+            except Exception:
+                pass
+        user_id = data.get("id")
         if user_id:
             return [str(user_id)]
     except Exception:
@@ -100,13 +113,25 @@ def _get_current_user_detail(
     *,
     base_url: str,
 ) -> dict:
+    cached_detail = getattr(session, "user_detail", None)
+    if isinstance(cached_detail, dict) and cached_detail:
+        return cached_detail
+
     user_data = web_session_module.request_json(
         session,
         "GET",
         f"{base_url}/api/v1/user/detail",
         timeout=30,
     )
-    return user_data.get("data", {}) if isinstance(user_data, dict) else {}
+    data = user_data.get("data", {}) if isinstance(user_data, dict) else {}
+    if isinstance(data, dict) and data:
+        session.user_detail = data
+        try:
+            session.save(account=session.login_username)
+        except Exception:
+            pass
+        return data
+    return {}
 
 
 def _first_non_empty_str(data: dict, keys: tuple[str, ...]) -> str:
@@ -371,7 +396,7 @@ def _resolve_notebook_id(
             ),
         )
 
-    user_ids = _try_get_current_user_ids(session, base_url=base_url)
+    user_ids: list[str] = []
 
     matches: list[tuple[str, dict]] = []
     for ws_id in workspace_ids:

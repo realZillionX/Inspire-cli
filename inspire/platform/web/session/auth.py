@@ -196,6 +196,24 @@ def login_with_playwright(
 
         _wait_for_api_auth()
 
+        user_detail: dict | None = None
+        try:
+            user_detail_resp = context.request.get(
+                f"{base_url}/api/v1/user/detail",
+                headers={
+                    "Accept": "application/json",
+                    "Referer": f"{base_url}/jobs/distributedTraining",
+                },
+                timeout=10000,
+            )
+            if user_detail_resp.status == 200:
+                payload = user_detail_resp.json()
+                data = payload.get("data")
+                if isinstance(data, dict):
+                    user_detail = data
+        except Exception:
+            user_detail = None
+
         # Extract workspace_id (spaceId)
         # Priority: 1) env var override, 2) auto-detect from browser, 3) default placeholder
         workspace_id = os.environ.get("INSPIRE_WORKSPACE_ID")
@@ -270,6 +288,7 @@ def login_with_playwright(
             workspace_id=workspace_id,
             login_username=username,
             base_url=base_url,
+            user_detail=user_detail,
             all_workspace_ids=all_workspace_ids or None,
             all_workspace_names=all_workspace_names or None,
             created_at=time.time(),
