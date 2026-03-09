@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.7 (2026-03-09)
+
+### Fix
+
+- cache notebook names for ssh lookup
+- parallelize notebook name lookup
+- clarify notebook ssh command failures
+- speed up cached notebook ssh lookups
+- reduce noisy rtunnel 404 readiness logs
+- harden notebook ssh command execution
+
 ## v0.2.6 (2026-03-09)
 
 ### Fix
