@@ -196,6 +196,8 @@ inspire resources specs --workspace cpu --group HPC-可上网区资源-2 --json
 推荐使用 `inspire init --discover` 自动生成配置，或 `inspire config show` 查看合并结果。
 默认分层下，全局配置主要保存账号级敏感信息，项目配置主要保存工作空间别名、计算组目录和默认值。
 
+Legacy `[auth].password` 仍然兼容，但当它与账号密码同时存在时，会优先使用 `[accounts."<username>"].password`。
+
 ### 多账号支持
 
 在 TOML 中为不同账号配置密码：

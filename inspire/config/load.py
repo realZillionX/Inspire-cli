@@ -68,6 +68,7 @@ _DEFAULTS_FIELD_MAP = {
     "image": "job_image",
     "notebook_image": "notebook_image",
     "notebook_resource": "notebook_resource",
+    "notebook_post_start": "notebook_post_start",
     "priority": "job_priority",
     "shm_size": "shm_size",
     "target_dir": "target_dir",
@@ -92,6 +93,10 @@ class _ProjectLayerState:
     project_account_catalogs: dict[str, dict[str, Any]]
     project_accounts: dict[str, str]
     prefer_source: str = "env"
+
+
+def _get_global_config_path() -> Path:
+    return Config.resolve_global_config_path()
 
 
 def _default_config_values() -> dict[str, Any]:
@@ -150,6 +155,7 @@ def _default_config_values() -> dict[str, Any]:
         "context_account": None,
         "notebook_resource": "1xH200",
         "notebook_image": None,
+        "notebook_post_start": None,
         "rtunnel_bin": None,
         "sshd_deb_dir": None,
         "dropbear_deb_dir": None,
@@ -406,11 +412,12 @@ def _apply_global_layer(
 ) -> tuple[Path | None, dict[str, dict[str, Any]]]:
     global_config_path: Path | None = None
     global_account_catalogs: dict[str, dict[str, Any]] = {}
-    if not Config.GLOBAL_CONFIG_PATH.exists():
+    resolved_global_path = _get_global_config_path()
+    if not resolved_global_path.exists():
         return global_config_path, global_account_catalogs
 
-    global_config_path = Config.GLOBAL_CONFIG_PATH
-    global_raw = _load_toml(Config.GLOBAL_CONFIG_PATH)
+    global_config_path = resolved_global_path
+    global_raw = _load_toml(resolved_global_path)
     global_compute_groups = global_raw.pop("compute_groups", [])
     global_remote_env = {str(k): str(v) for k, v in global_raw.pop("remote_env", {}).items()}
     global_accounts, global_account_catalogs = _parse_global_accounts(
@@ -730,18 +737,13 @@ def _apply_password_and_token_fallbacks(
     project_accounts: dict[str, str],
     env_password: str | None,
 ) -> None:
-    # Password fallback is intentionally layered:
-    # 1) explicit config.password if already set
-    # 2) account-password lookup keyed by resolved username
-    # 3) INSPIRE_PASSWORD environment fallback
-    if not config_dict.get("password"):
-        resolved_username = str(config_dict.get("username") or "").strip()
-        account_password = config_dict.get("accounts", {}).get(resolved_username)
-        if account_password:
-            config_dict["password"] = account_password
-            sources["password"] = (
-                SOURCE_PROJECT if resolved_username in project_accounts else SOURCE_GLOBAL
-            )
+    resolved_username = str(config_dict.get("username") or "").strip()
+    account_password = config_dict.get("accounts", {}).get(resolved_username)
+    if account_password:
+        config_dict["password"] = account_password
+        sources["password"] = (
+            SOURCE_PROJECT if resolved_username in project_accounts else SOURCE_GLOBAL
+        )
 
     if not config_dict.get("password") and env_password:
         config_dict["password"] = env_password
@@ -860,6 +862,7 @@ def config_from_files_and_env(
 
 
 def get_config_paths() -> tuple[Path | None, Path | None]:
-    global_path = Config.GLOBAL_CONFIG_PATH if Config.GLOBAL_CONFIG_PATH.exists() else None
+    resolved_global_path = _get_global_config_path()
+    global_path = resolved_global_path if resolved_global_path.exists() else None
     project_path = _find_project_config()
     return global_path, project_path

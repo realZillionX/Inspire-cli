@@ -863,6 +863,72 @@ def _resolve_discover_runtime(
     return session, prompted_credentials, account_key, workspace_id
 
 
+def _candidate_workspace_ids_for_discovery(
+    *,
+    session,  # noqa: ANN001
+    workspace_id: str,
+) -> list[str]:
+    """Return deduplicated workspace IDs to query during discovery."""
+    candidates: list[str] = [workspace_id]
+    candidates.extend(str(ws or "").strip() for ws in (session.all_workspace_ids or []))
+
+    # Best-effort augmentation for stale/partial session metadata.
+    try:
+        from inspire.platform.web.browser_api.workspaces import try_enumerate_workspaces
+
+        for ws in try_enumerate_workspaces(session, workspace_id=workspace_id):
+            ws_id = str(ws.get("id") or "").strip()
+            if ws_id:
+                candidates.append(ws_id)
+    except Exception:
+        pass
+
+    ordered_unique: list[str] = []
+    seen: set[str] = set()
+    for raw_ws in candidates:
+        ws = str(raw_ws or "").strip()
+        if not ws or ws in seen:
+            continue
+        seen.add(ws)
+        ordered_unique.append(ws)
+    return ordered_unique
+
+
+def _collect_discovery_projects(
+    *,
+    browser_api_module,  # noqa: ANN001
+    session,  # noqa: ANN001
+    workspace_id: str,
+) -> tuple[list[object], list[tuple[str, str]]]:
+    """Collect projects across discovered workspaces (best-effort per workspace)."""
+    workspace_ids = _candidate_workspace_ids_for_discovery(
+        session=session,
+        workspace_id=workspace_id,
+    )
+
+    discovered: list[object] = []
+    errors: list[tuple[str, str]] = []
+    seen_project_ids: set[str] = set()
+
+    for ws_id in workspace_ids:
+        try:
+            ws_projects = browser_api_module.list_projects(workspace_id=ws_id, session=session)
+        except Exception as exc:  # pragma: no cover - network/runtime dependent
+            errors.append((ws_id, str(exc)))
+            continue
+
+        for project in ws_projects:
+            project_id = str(getattr(project, "project_id", "") or "").strip()
+            if not project_id:
+                continue
+            if project_id in seen_project_ids:
+                continue
+            seen_project_ids.add(project_id)
+            discovered.append(project)
+
+    return discovered, errors
+
+
 def _load_projects_for_discovery(
     *,
     browser_api_module,  # noqa: ANN001
@@ -872,15 +938,39 @@ def _load_projects_for_discovery(
     probe_shared_path: bool,
     probe_limit: int,
 ) -> tuple[list[object], object]:
-    try:
-        projects = browser_api_module.list_projects(workspace_id=workspace_id, session=session)
-    except Exception as e:  # pragma: no cover - network/runtime dependent
-        click.echo(click.style(f"Failed to list projects: {e}", fg="red"))
-        raise SystemExit(1) from e
+    projects, workspace_errors = _collect_discovery_projects(
+        browser_api_module=browser_api_module,
+        session=session,
+        workspace_id=workspace_id,
+    )
 
     if not projects:
-        click.echo(click.style("No projects found for this workspace", fg="red"))
+        if workspace_errors:
+            sample = ", ".join(f"{ws}: {msg}" for ws, msg in workspace_errors[:3])
+            if len(workspace_errors) > 3:
+                sample += ", ..."
+            click.echo(
+                click.style(
+                    f"Failed to list projects across discovered workspaces "
+                    f"({len(workspace_errors)} failed: {sample})",
+                    fg="red",
+                )
+            )
+        else:
+            click.echo(click.style("No projects found for discovered workspaces", fg="red"))
         raise SystemExit(1)
+
+    if workspace_errors and not force:
+        sample = ", ".join(f"{ws}: {msg}" for ws, msg in workspace_errors[:3])
+        if len(workspace_errors) > 3:
+            sample += ", ..."
+        click.echo(
+            click.style(
+                f"Warning: some workspaces failed during project discovery "
+                f"({len(workspace_errors)}): {sample}",
+                fg="yellow",
+            )
+        )
 
     if probe_shared_path and probe_limit < 0:
         click.echo(click.style("Invalid --probe-limit (must be >= 0)", fg="red"))
@@ -1697,16 +1787,6 @@ def _cleanup_global_discovery_metadata(
             global_data.pop("accounts", None)
         return
 
-    for key in (
-        "projects",
-        "workspaces",
-        "compute_groups",
-        "project_catalog",
-        "shared_path_group",
-        "train_job_workdir",
-    ):
-        account_section.pop(key, None)
-
     if not account_section:
         accounts.pop(account_key, None)
     if not accounts:
@@ -2065,7 +2145,7 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
     prompted_credentials = request.prompted_credentials
     cli_target_dir = request.cli_target_dir
 
-    global_path = Config.GLOBAL_CONFIG_PATH
+    global_path = Config.resolve_global_config_path()
     project_path = Path.cwd() / PROJECT_CONFIG_DIR / CONFIG_FILENAME
     if not _confirm_discovery_writes(
         force=force, global_path=global_path, project_path=project_path
@@ -2100,6 +2180,20 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         account_key=account_key,
         force=force,
     )
+    project_workspace_ids = {
+        str(getattr(project, "workspace_id", "") or "").strip()
+        for project in projects
+        if str(getattr(project, "workspace_id", "") or "").strip()
+    }
+    if len(project_workspace_ids) > 1:
+        project_aliases = project_data.get("projects")
+        if isinstance(project_aliases, dict) and project_aliases:
+            account_section["projects"] = deepcopy(project_aliases)
+        if project_catalog:
+            account_section["project_catalog"] = deepcopy(project_catalog)
+    else:
+        account_section.pop("projects", None)
+        account_section.pop("project_catalog", None)
     _update_account_shared_path_group(
         account_section=project_account_section,
         project_catalog=project_catalog,
