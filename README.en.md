@@ -34,6 +34,7 @@ inspire init --discover -u <username> --base-url https://qz.sii.edu.cn
 ```
 
 This opens a browser for CAS Web SSO login, then automatically discovers your projects, workspaces, compute groups, and shared filesystem paths. It writes sensitive account data such as passwords and base URL to the global config (`~/.config/inspire/config.toml`), while project-specific resource mappings such as workspace aliases and compute groups are written to the project config (`.inspire/config.toml`).
+When the account can access multiple workspaces, discovery attempts to aggregate visible projects across them. Workspace aliases and compute-group catalogs remain project-local.
 
 Set password as an env var to avoid repeated prompts:
 
@@ -194,6 +195,9 @@ Config is loaded in priority order (later overrides earlier):
 3. **Environment variables**
 
 Use `inspire init --discover` for auto-generation, or `inspire config show` to inspect the merged result. In the default split, global config stores account-level secrets and project config stores resource mappings and defaults.
+You can override the default global config location with `INSPIRE_GLOBAL_CONFIG_PATH`.
+
+Legacy `[auth].password` is still supported, but `[accounts."<username>"].password` takes precedence when both are present.
 
 ### Multi-account Support
 
@@ -290,6 +294,7 @@ When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8
 | `INSPIRE_PASSWORD`    | Platform password (fallback) | —           |
 | `INSPIRE_BASE_URL`    | API base URL                 | From config |
 | `INSPIRE_FORCE_PROXY` | Force OpenAPI through proxy  | `false`     |
+| `INSPIRE_GLOBAL_CONFIG_PATH` | Override global config path | —      |
 | `INSPIRE_TARGET_DIR`  | Bridge shared directory path | —           |
 
 ### Proxy
@@ -317,6 +322,14 @@ When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8
 | `INSP_IMAGE`                | Default image             | —        |
 | `INSP_PRIORITY`             | Default priority (1-10)   | `6`      |
 | `INSPIRE_NOTEBOOK_RESOURCE` | Default notebook resource | `1xH200` |
+| `INSPIRE_NOTEBOOK_POST_START` | Default notebook post-start action | — |
+
+### Debugging
+
+| Variable                    | Description                         |
+| --------------------------- | ----------------------------------- |
+| `INSPIRE_DEBUG_LOG_DIR`     | Directory for `inspire --debug` logs |
+| `INSPIRE_RTUNNEL_TIMING`    | Emit per-step rtunnel timing         |
 
 ---
 
@@ -326,10 +339,12 @@ When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8
 
 - **There is no `inspire tunnel start` command.** Create or refresh Profiles with `inspire notebook ssh <id> --save-as <name>`.
 - **`allow_ssh=false` is the platform default.** SSH requires `sshd` + `rtunnel` pre-installed in the container — connection failure typically means the image lacks the SSH toolchain.
-- `notebook ssh` injects an install script via Jupyter WebSocket, but **this may silently fail** — reports "Sent setup script" while `/tmp/rtunnel` doesn't exist in the container. Manually install in the container's Web terminal if needed.
+- On first bootstrap, `notebook ssh` opens JupyterLab, prefers uploading `rtunnel` via Jupyter Contents API, then dispatches the setup script via terminal REST API + terminal WebSocket. Only if that path fails does it fall back to Playwright terminal automation. **This can still silently fail** — reports "Sent setup script" while `/tmp/rtunnel` doesn't exist in the container. Manually install in the container's Web terminal if needed.
+- For offline notebooks, once the flow is using uploaded binaries or dropbear/apt-mirror bootstrap, the CLI skips doomed `curl` download fallbacks.
 - Images saved from instances with SSH installed will retain sshd — no need to reinstall.
 - `bridge exec` and `bridge ssh` auto-reconnect dropped tunnels for notebook-backed Profiles; `bridge scp` only checks availability without rebuilding.
 - rtunnel install script uses dynamic platform detection (`uname -s/-m`), independent of local host architecture.
+- `inspire --debug` writes a redacted debug report under `~/.cache/inspire-cli/logs/`, which is useful for tracing upload, terminal, and proxy failures.
 
 ### Manual SSH Setup
 

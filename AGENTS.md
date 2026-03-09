@@ -17,12 +17,14 @@
   - `init/`: `init_cmd.py`, `discover.py`, `templates.py`, `env_detect.py`, `toml_helpers.py`, `errors.py`, `json_report.py`
   - `image/`: `image_commands.py` (list, detail, register, save, delete, set-default)
   - `job/`: `job_commands.py`, `job_create.py`, `job_logs.py`, `job_deps.py`
-  - `notebook/`: `notebook_commands.py`, `notebook_create_flow.py`, `top.py`
+  - `notebook/`: `notebook_commands.py`, `notebook_create_flow.py`, `notebook_lookup.py`, `notebook_presenters.py`, `notebook_ssh_flow.py`, `top.py`
   - `project/`: `project_commands.py`
-  - `resources/`: `resources_list.py`, `resources_nodes.py`, `resources_specs.py`
+  - `resources/`: `resources_list.py`, `resources_nodes.py`, `resources_specs.py`, `resources_predict.py`
 - Formatters: `inspire/cli/formatters/human_formatter.py` (human-readable) and `json_formatter.py` (machine-readable).
+- Debug logging helpers live in `inspire/cli/logging_setup.py`.
 - Domain packages (preferred for shared logic used by CLI):
   - `inspire/config/`: config models, TOML/env loading, schema/options, runtime helpers.
+  - Config loading is split across `load.py` (compat facade), `load_common.py`, `load_layers.py`, `load_runtime.py`, and `load_accounts.py`.
   - `inspire/config/options/`: option groups in `api.py`, `forge.py`, `infra.py`, `project.py`.
   - `inspire/platform/openapi/`: OpenAPI client/auth/jobs/nodes/resources.
   - `inspire/platform/web/`: web session (SSO) + browser-only APIs (`session/`, `browser_api/`, `resources.py`).
@@ -70,8 +72,11 @@
 - Integration tests are marked with `@pytest.mark.integration`; keep them isolated from unit tests and avoid requiring live credentials in standard runs.
 - `tests/test_cli_smoke.py` validates `--help` output and key command presence; update it when adding/removing top-level command groups in `inspire/cli/main.py` (including `hpc`).
 - For proxy/config changes, run `tests/test_openapi_proxy_config.py`, `tests/test_web_session_proxy.py`, and `tests/test_web_config_resolution.py`.
+- For OpenAPI config/transport changes, also run `tests/test_openapi_client_config.py`.
 - For image-source behavior changes, run `tests/test_image_commands.py` (covers `private`/`my-private`/`all` semantics and image-id resolution).
 - For resource selection changes, run `tests/test_resources_specs_command.py`, `tests/test_cpu_compute_group_fixes.py`, and `tests/test_notebook_create_flow.py`.
+- For notebook command surface or SSH changes, run `tests/test_notebook_commands.py`, `tests/test_notebook_rtunnel_commands.py`, and `tests/test_notebook_post_start.py`.
+- For debug logging changes, run `tests/test_debug_logging.py`.
 
 ## Commit & Pull Request Guidelines
 - Prefer concise, imperative commit subjects. Conventional-commit prefixes are acceptable when useful.
@@ -82,12 +87,16 @@
   1. `~/.config/inspire/config.toml` (global)
   2. `./.inspire/config.toml` (project)
   3. Environment variables
+- `INSPIRE_GLOBAL_CONFIG_PATH` overrides the default global config path for both reads and writes (`init`, `discover`, template generation, and normal runtime loading).
 - Default conflict precedence is env-over-TOML; `inspire config show` surfaces value sources and precedence.
 - Typical required inputs for authenticated commands are `INSPIRE_USERNAME`, `INSPIRE_PASSWORD` (or `[accounts."<username>"].password`), and `INSPIRE_TARGET_DIR`.
+- Account-scoped passwords in `[accounts."<username>"].password` override legacy `[auth].password` when both are present.
 - Gitea/Forge workflow sync and remote logs rely on `INSP_GITEA_REPO`, `INSP_GITEA_TOKEN`, and `INSP_GITEA_SERVER`.
 - Optional: `INSPIRE_SHM_SIZE` (or `job.shm_size` in config) sets default shared memory (GiB) for job and notebook creation.
+- Optional: `INSPIRE_NOTEBOOK_POST_START` (or `notebook.post_start`) configures a post-start shell action for notebook create/start flows.
 - Optional: `INSPIRE_BRIDGE_ACTION_TIMEOUT` (or `bridge.action_timeout` in config) sets default timeout (seconds) for `inspire bridge exec`.
 - Optional: `INSPIRE_BROWSER_API_PREFIX` overrides the default browser API path prefix.
+- Optional: `INSPIRE_DEBUG_LOG_DIR` overrides the per-run debug report directory used by `inspire --debug`.
 - Proxy precedence is unified as: explicit `INSPIRE_*_PROXY` env vars > layered TOML `[proxy]` > system `http_proxy`/`https_proxy`.
 - `INSPIRE_FORCE_PROXY` / `[api].force_proxy` disables `requests.Session.trust_env` for OpenAPI calls to prevent `no_proxy` or system bypass.
 - For `.sii.edu.cn` deployments, when request-side proxy resolves to `http://127.0.0.1:8888`, Playwright/rtunnel auto-fallback to `socks5://127.0.0.1:1080`.
@@ -111,12 +120,16 @@
 - `inspire hpc create` sends `memory_per_cpu` as a string with `G` suffix (e.g. `"4G"`) and `cpus_per_task` as a string, matching the OpenAPI spec. It retries with payload fallbacks when backend rejects `task_priority`/`priority` fields. `--image` must be a full docker address (e.g. `docker.sii.shaipower.online/inspire-studio/<name>:<version>`).
 - `make_request_with_retry()` in `inspire/platform/openapi/http.py` retries HTTP 429 (rate limit) responses with exponential backoff, in addition to 5xx errors.
 - Job subcommands (`list/status/stop/wait/update/command`) load layered config from files + env (not env-only).
-- `notebook ssh` setup prefers the direct Jupyter terminal API path first: create terminal via `POST .../api/terminals`, then send setup over terminal WebSocket (`.../terminals/websocket/<name>`). If WS delivery fails, fallback is Playwright UI terminal automation. **WebSocket injection may silently fail**—`notebook ssh` reports "Sent setup script" but the container may have no `/tmp/rtunnel`; manual installation in the container Web terminal is then required.
+- `notebook ssh` first bootstraps from the web/Jupyter side: it opens JupyterLab with Playwright, uploads the local `rtunnel` binary via Jupyter Contents API when available, then prefers terminal REST API + terminal WebSocket delivery for the setup script. If terminal WS delivery fails, fallback is Playwright UI terminal automation.
+- `notebook ssh` skips `curl` fallback when the runtime is clearly offline (Contents API upload succeeded, or dropbear/apt-mirror bootstrap is in use). In those cases a missing `/tmp/rtunnel` is surfaced as an explicit bootstrap error instead of a doomed download attempt.
 - rtunnel setup script now uses dynamic platform detection (`uname -s`/`uname -m`) inside the container to determine the correct binary download URL, instead of using the local machine's `platform.system()`/`platform.machine()` values.
 - `open_notebook_lab()` now probes `/ide` briefly (short frame probe window) and falls back early to direct `/api/v1/notebook/lab/<id>/` navigation.
+- `inspire --debug` writes a redacted per-run report under `~/.cache/inspire-cli/logs/` by default; secrets, cookies, bearer tokens, and Jupyter proxy path tokens are masked before writing.
 - Session-expiry handling refreshes credentials in place: `request_json()` re-authenticates once and updates the same `WebSession` object.
 - HTTP proxy readiness checks can still report transient failures (`404`, `ECONNREFUSED`) even when SSH succeeds. Treat HTTP probe as advisory; use SSH preflight (`inspire tunnel test`) as authoritative.
 - rtunnel proxy state is cached per account under `~/.cache/inspire-cli/rtunnel-proxy-state*.json` with TTL-based reuse.
 - Set `INSPIRE_RTUNNEL_TIMING=1` to enable per-step timing output in `_setup_notebook_rtunnel_sync()`.
+- `inspire init --discover` now collects projects across discovered workspaces, not only the current workspace. Global per-account catalog data is persisted only when discovery actually spans multiple workspaces; project-level config remains the canonical place for workspace aliases and compute-group catalogs.
+- Notebook post-start actions are now first-class. Use `notebook.post_start` / `INSPIRE_NOTEBOOK_POST_START`, `--post-start`, or `--post-start-script`; the old keepalive preset is removed, and `none` is the supported way to disable a configured default.
 - Keep tracked tests/docs free of credentials, tokens, and private endpoint values.
 - `inspire init` probe controls (`--probe-limit`, `--probe-keep-notebooks`, `--probe-pubkey`/`--pubkey`, `--probe-timeout`) are only effective with `--discover --probe-shared-path`; otherwise they are accepted but ignored.

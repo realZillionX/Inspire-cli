@@ -34,6 +34,7 @@ inspire init --discover -u <用户名> --base-url https://qz.sii.edu.cn
 ```
 
 该命令会拉起浏览器完成 CAS Web SSO 登录，自动发现你的项目、工作空间、计算组、共享文件系统路径，并写入全局配置 `~/.config/inspire/config.toml` 和项目配置 `.inspire/config.toml`。
+当账号可见多个 workspace 时，discover 会尽量聚合可见项目；工作空间别名和计算组目录仍以项目级配置为准。
 
 设置密码环境变量可避免重复输入：
 
@@ -195,6 +196,7 @@ inspire resources specs --workspace cpu --group HPC-可上网区资源-2 --json
 
 推荐使用 `inspire init --discover` 自动生成配置，或 `inspire config show` 查看合并结果。
 默认分层下，全局配置主要保存账号级敏感信息，项目配置主要保存工作空间别名、计算组目录和默认值。
+可选地通过 `INSPIRE_GLOBAL_CONFIG_PATH` 覆盖默认的全局配置路径。
 
 Legacy `[auth].password` 仍然兼容，但当它与账号密码同时存在时，会优先使用 `[accounts."<username>"].password`。
 
@@ -293,6 +295,7 @@ rtunnel = "socks5://127.0.0.1:1080"
 | `INSPIRE_PASSWORD`    | 平台密码（兜底）        | —          |
 | `INSPIRE_BASE_URL`    | API 基地址              | 由配置决定 |
 | `INSPIRE_FORCE_PROXY` | 强制 OpenAPI 走代理     | `false`    |
+| `INSPIRE_GLOBAL_CONFIG_PATH` | 全局配置文件路径覆盖 | —          |
 | `INSPIRE_TARGET_DIR`  | Bridge 共享目录目标路径 | —          |
 
 ### 代理
@@ -320,6 +323,14 @@ rtunnel = "socks5://127.0.0.1:1080"
 | `INSP_IMAGE`                | 默认镜像               | —        |
 | `INSP_PRIORITY`             | 默认优先级（1-10）     | `6`      |
 | `INSPIRE_NOTEBOOK_RESOURCE` | 默认 Notebook 资源规格 | `1xH200` |
+| `INSPIRE_NOTEBOOK_POST_START` | 默认 Notebook 启动后动作 | —      |
+
+### 调试
+
+| 变量                     | 说明                         |
+| ------------------------ | ---------------------------- |
+| `INSPIRE_DEBUG_LOG_DIR`  | `inspire --debug` 日志目录   |
+| `INSPIRE_RTUNNEL_TIMING` | 输出 rtunnel 各步骤耗时      |
 
 ---
 
@@ -329,10 +340,12 @@ rtunnel = "socks5://127.0.0.1:1080"
 
 - **没有 `inspire tunnel start` 命令。** 通过 `inspire notebook ssh <id> --save-as <name>` 创建或刷新 Profile。
 - **`allow_ssh=false` 是平台默认状态。** SSH 需要容器内预装 `sshd` + `rtunnel`——如果连接失败，通常意味着镜像未包含 SSH 工具链。
-- `notebook ssh` 会通过 Jupyter WebSocket 注入安装脚本，但**此机制可能静默失败**——报 "Sent setup script" 但容器内无 `/tmp/rtunnel`。此时需在容器 Web 终端手动安装。
+- `notebook ssh` 首次引导会先打开 JupyterLab，优先通过 Jupyter Contents API 上传 `rtunnel`，再通过 terminal REST API + terminal WebSocket 下发安装脚本；如果这些路径失败，才退回 Playwright 终端自动化。**这条链路仍可能静默失败**——报 "Sent setup script" 但容器内无 `/tmp/rtunnel`。此时需在容器 Web 终端手动安装。
+- 对无公网 notebook，如果已走上传二进制或 dropbear/apt-mirror 路径，CLI 会跳过注定失败的 `curl` 下载兜底。
 - 从已安装 SSH 工具链的实例保存的镜像会保留 sshd，后续实例无需重复安装。
 - `bridge exec` 和 `bridge ssh` 在 notebook-backed Profile 上会自动重连断开的隧道；`bridge scp` 仅检查隧道可用性，不会自动重建。
 - rtunnel 安装脚本使用动态平台检测（`uname -s/-m`），不依赖本地主机架构。
+- `inspire --debug` 会把脱敏后的调试报告写到 `~/.cache/inspire-cli/logs/`，便于排查上传、终端和代理链路。
 
 ### SSH 初始化（手动安装）
 
