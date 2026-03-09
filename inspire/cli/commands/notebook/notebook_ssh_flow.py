@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from typing import Optional
@@ -78,6 +79,12 @@ def _command_timeout_seconds(command_timeout: Optional[int]) -> Optional[int]:
     return int(command_timeout)
 
 
+def _command_failure_hint(command: str, exit_code: int) -> str | None:
+    if exit_code == 1 and re.search(r"\bgrep\b", command):
+        return "grep returns exit code 1 when no matches are found."
+    return None
+
+
 def _should_retry_non_interactive_disconnect(
     *,
     returncode: int,
@@ -135,6 +142,7 @@ def _run_notebook_command_with_reconnect(
         reconnect_pause=tunnel_retry_pause,
     )
     timeout_s = _command_timeout_seconds(command_timeout)
+    announced_command_start = False
 
     def _runtime_loader() -> object:
         return resolve_ssh_runtime_config(
@@ -264,6 +272,10 @@ def _run_notebook_command_with_reconnect(
                 )
                 raise SystemExit(result.returncode)
 
+            if not announced_command_start:
+                click.echo("Running remote command...", err=True)
+                announced_command_start = True
+
             exit_code = run_ssh_command_streaming(
                 command=command,
                 bridge_name=profile_name,
@@ -282,7 +294,14 @@ def _run_notebook_command_with_reconnect(
                     continue
                 return
 
-            raise SystemExit(exit_code)
+            _handle_error(
+                ctx,
+                "CommandFailed",
+                f"Command failed with exit code {exit_code}.",
+                exit_code,
+                hint=_command_failure_hint(command, exit_code),
+            )
+            return
         except subprocess.TimeoutExpired:
             timeout_label = timeout_s if timeout_s is not None else "configured"
             _handle_error(
