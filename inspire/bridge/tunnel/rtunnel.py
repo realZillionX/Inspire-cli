@@ -25,9 +25,10 @@ def _is_rtunnel_binary_usable(path: Path) -> bool:
         return False
 
     try:
-        # `--version` is a lightweight health check and catches exec-format errors.
+        # `--help` is a lightweight health check and catches exec-format errors
+        # while rejecting trivial executable stubs that merely exit non-zero.
         result = subprocess.run(
-            [str(path), "--version"],
+            [str(path), "--help"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -36,8 +37,7 @@ def _is_rtunnel_binary_usable(path: Path) -> bool:
     except (OSError, subprocess.SubprocessError, ValueError):
         return False
 
-    # Some builds may return non-zero for --version while still being executable.
-    return result.returncode in {0, 1, 2}
+    return result.returncode == 0
 
 
 def _get_rtunnel_download_url() -> str:
