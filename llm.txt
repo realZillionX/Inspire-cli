@@ -2,6 +2,8 @@
 
 > Quick reference for AI assistants working with the Inspire CLI codebase.
 
+Project-level `AGENTS.md` now lives outside this repository at `../AGENTS.md`.
+
 ## Project Overview
 
 Inspire CLI is a command-line tool for the Inspire HPC platform:
@@ -61,7 +63,7 @@ inspire-cli/
 │   └── api/                     # Legacy compatibility surface
 ├── tests/
 ├── examples/
-├── AGENTS.md
+├── llm.txt
 └── pyproject.toml
 ```
 
