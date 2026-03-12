@@ -45,12 +45,12 @@ class Config:
     retry_delay: float = 1.0
 
     # Git platform selection
-    git_platform: Optional[str] = None
+    git_platform: Optional[str] = "github"
 
     # Gitea / remote log settings
     gitea_repo: Optional[str] = None
     gitea_token: Optional[str] = None
-    gitea_server: str = "https://codeberg.org"
+    gitea_server: str = "https://gitea.example.com"
     gitea_log_workflow: str = "retrieve_job_log.yml"
     gitea_sync_workflow: str = "sync_code.yml"
     gitea_bridge_workflow: str = "run_bridge_action.yml"
@@ -90,7 +90,7 @@ class Config:
     rtunnel_proxy: Optional[str] = None
 
     # Job settings
-    job_priority: int = 6
+    job_priority: int = 10
     job_image: Optional[str] = None
     job_project_id: Optional[str] = None
     job_workspace_id: Optional[str] = None

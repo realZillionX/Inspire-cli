@@ -13,7 +13,7 @@ class _DummyResourceManager:
 class _DummyAPI:
     DEFAULT_PROJECT_ID = "project-default"
     DEFAULT_WORKSPACE_ID = "ws-default"
-    DEFAULT_TASK_PRIORITY = 6
+    DEFAULT_TASK_PRIORITY = 10
     DEFAULT_INSTANCE_COUNT = 1
     DEFAULT_MAX_RUNNING_TIME = "3600000"
     DEFAULT_SHM_SIZE = 128

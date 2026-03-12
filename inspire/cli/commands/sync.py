@@ -35,7 +35,9 @@ from inspire.bridge.forge import (
     ForgeError,
     GiteaAuthError,
     GiteaError,
+    GitPlatform,
     _get_active_repo,
+    _resolve_platform,
     create_forge_client,
     trigger_sync_workflow,
     wait_for_workflow_completion,
@@ -54,6 +56,12 @@ from inspire.cli.utils.output import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _workflow_method_name(config: Config) -> str:
+    """Return a stable method label for workflow-based sync."""
+    platform = _resolve_platform(config)
+    return "github_actions" if platform == GitPlatform.GITHUB else "gitea_actions"
 
 
 def get_current_branch() -> str:
@@ -416,10 +424,10 @@ def sync_via_workflow(
                 error_type="Timeout",
                 message=f"Sync workflow did not complete within {timeout}s",
                 exit_code=EXIT_GENERAL_ERROR,
-                hint="Check Gitea for sync workflow status.",
+                hint="Check your Git platform workflow status.",
                 human_lines=[
                     f"Sync workflow timed out after {timeout}s",
-                    "The sync may still complete. Check Gitea for status.",
+                    "The sync may still complete. Check your Git platform workflow status.",
                 ],
             )
             return EXIT_GENERAL_ERROR
@@ -437,7 +445,7 @@ def sync_via_workflow(
                     ctx,
                     payload={
                         "status": "success",
-                        "method": "gitea_actions",
+                        "method": _workflow_method_name(config),
                         "branch": branch,
                         "remote": remote,
                         "commit": commit_sha[:7],
@@ -477,7 +485,7 @@ def sync_via_workflow(
             ctx,
             payload={
                 "status": "triggered",
-                "method": "gitea_actions",
+                "method": _workflow_method_name(config),
                 "branch": branch,
                 "remote": remote,
                 "commit": commit_sha[:7],

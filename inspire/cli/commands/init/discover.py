@@ -1851,7 +1851,7 @@ def _resolve_probe_defaults(
         raise SystemExit(1) from e
 
     shm_size = int(config.shm_size) if config.shm_size is not None else 32
-    task_priority = int(config.job_priority) if config.job_priority is not None else 6
+    task_priority = int(config.job_priority) if config.job_priority is not None else 10
     task_priority = max(1, min(9, task_priority))
 
     return _ProbeDefaults(

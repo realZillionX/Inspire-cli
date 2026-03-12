@@ -45,11 +45,11 @@ job_cache = "~/.inspire/jobs.json"
 log_cache_dir = "~/.inspire/logs"
 
 [git]
-# Platform selection: "gitea" or "github"
-platform = "gitea"
+# Platform selection: "github" or "gitea"
+platform = "github"
 
 [gitea]
-server = "https://codeberg.org"
+server = "https://gitea.example.com"
 repo = "owner/repo"
 # token - use INSP_GITEA_TOKEN env var
 log_workflow = "retrieve_job_log.yml"
@@ -82,7 +82,7 @@ denylist = ["*.tmp", ".git/*"]
 # project_id = "project-..."
 # workspace_id = "ws-..."
 # image = "pytorch:latest"
-# priority = 6
+# priority = 10
 # shm_size = 32  # Default shared memory (GiB) for notebooks; jobs use it when set
 
 [notebook]

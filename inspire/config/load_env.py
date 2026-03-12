@@ -83,10 +83,10 @@ def config_from_env(*, require_target_dir: bool = False) -> Config:
         timeout=timeout,
         max_retries=max_retries,
         retry_delay=retry_delay,
-        git_platform=os.getenv("INSP_GIT_PLATFORM"),
+        git_platform=os.getenv("INSP_GIT_PLATFORM", "github"),
         gitea_repo=os.getenv("INSP_GITEA_REPO"),
         gitea_token=os.getenv("INSP_GITEA_TOKEN"),
-        gitea_server=os.getenv("INSP_GITEA_SERVER", "https://codeberg.org"),
+        gitea_server=os.getenv("INSP_GITEA_SERVER", "https://gitea.example.com"),
         gitea_log_workflow=os.getenv("INSP_GITEA_LOG_WORKFLOW", "retrieve_job_log.yml"),
         gitea_sync_workflow=os.getenv("INSP_GITEA_SYNC_WORKFLOW", "sync_code.yml"),
         gitea_bridge_workflow=os.getenv("INSP_GITEA_BRIDGE_WORKFLOW", "run_bridge_action.yml"),
@@ -119,11 +119,11 @@ def config_from_env_for_sync() -> Config:
             "Set it with: export INSPIRE_TARGET_DIR='/path/to/shared/directory'"
         )
 
-    platform = os.getenv("INSP_GIT_PLATFORM", "gitea").strip().lower()
+    platform = os.getenv("INSP_GIT_PLATFORM", "github").strip().lower()
     if platform == "github":
         gitea_repo = None
         gitea_token = None
-        gitea_server = "https://codeberg.org"
+        gitea_server = "https://gitea.example.com"
         github_repo = os.getenv("INSP_GITHUB_REPO")
         github_token = os.getenv("INSP_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN")
         github_server = os.getenv("INSP_GITHUB_SERVER", "https://github.com")
@@ -135,7 +135,7 @@ def config_from_env_for_sync() -> Config:
     else:
         gitea_repo = os.getenv("INSP_GITEA_REPO")
         gitea_token = os.getenv("INSP_GITEA_TOKEN")
-        gitea_server = os.getenv("INSP_GITEA_SERVER", "https://codeberg.org")
+        gitea_server = os.getenv("INSP_GITEA_SERVER", "https://gitea.example.com")
         github_repo = None
         github_token = None
         github_server = "https://github.com"

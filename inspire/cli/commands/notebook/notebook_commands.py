@@ -196,7 +196,7 @@ def run_notebook_ssh(*args, **kwargs):  # noqa: ANN002, ANN003
     "--priority",
     type=click.IntRange(1, 10),
     default=None,
-    help="Task priority (1-10, default from config [job].priority or 6)",
+    help="Task priority (1-10, default from config [job].priority or 10)",
 )
 @pass_context
 def create_notebook_cmd(

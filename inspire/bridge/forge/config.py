@@ -30,7 +30,7 @@ def _resolve_platform(config: Config) -> GitPlatform:
     Priority:
     1. INSP_GIT_PLATFORM / git.platform setting (if explicitly set)
     2. Auto-detect from GitHub vars if set
-    3. Default to GITEA for backward compatibility
+    3. Default to GITHUB
     """
     # Check environment variable first
     platform_env = os.getenv("INSP_GIT_PLATFORM", "").strip().lower()
@@ -50,8 +50,8 @@ def _resolve_platform(config: Config) -> GitPlatform:
     if config.github_repo or config.github_token:
         return GitPlatform.GITHUB
 
-    # Default to Gitea for backward compatibility
-    return GitPlatform.GITEA
+    # Default to GitHub.
+    return GitPlatform.GITHUB
 
 
 def _get_active_repo(config: Config) -> str:
@@ -107,7 +107,7 @@ def _get_active_server(config: Config) -> str:
     if platform == GitPlatform.GITHUB:
         return (getattr(config, "github_server", None) or "https://github.com").rstrip("/")
     else:
-        return (config.gitea_server or "https://codeberg.org").rstrip("/")
+        return (config.gitea_server or "https://gitea.example.com").rstrip("/")
 
 
 def _get_active_workflow_file(config: Config, workflow_type: str) -> str:

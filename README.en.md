@@ -320,7 +320,7 @@ When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8
 | Variable                    | Description               | Default  |
 | --------------------------- | ------------------------- | -------- |
 | `INSP_IMAGE`                | Default image             | —        |
-| `INSP_PRIORITY`             | Default priority (1-10)   | `6`      |
+| `INSP_PRIORITY`             | Default priority (1-10)   | `10`     |
 | `INSPIRE_NOTEBOOK_RESOURCE` | Default notebook resource | `1xH200` |
 | `INSPIRE_NOTEBOOK_POST_START` | Default notebook post-start action | — |
 
@@ -376,7 +376,7 @@ Three independent auth chains (cannot substitute for each other):
 
 1. **OpenAPI**: Bearer Token (`POST /auth/token`) — for `job`/`run`/`hpc`/`config check`.
 2. **Web SSO**: Browser CAS Cookie Session — for `notebook`/`image`/`resources`/`project`.
-3. **Git Platform**: Gitea/GitHub Token — for `job logs`/`sync --transport workflow`.
+3. **Git Platform**: GitHub/Gitea Token — for `job logs`/`sync --transport workflow`.
 
 `config check` passing does not guarantee Web Session or Git Platform are functional.
 

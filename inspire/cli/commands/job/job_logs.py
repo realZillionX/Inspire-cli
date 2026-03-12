@@ -21,6 +21,10 @@ import click
 from inspire.bridge.forge import (
     GiteaAuthError,
     GiteaError,
+    GitPlatform,
+    _get_active_repo,
+    _get_active_server,
+    _resolve_platform,
     fetch_remote_log_incremental,
 )
 from inspire.bridge.tunnel import (
@@ -112,12 +116,18 @@ def _update_log_offset_to_filesize(
 def _format_remote_log_error_message(
     err: Exception, *, remote_log_path: str, config: Config
 ) -> str:
+    platform = _resolve_platform(config)
+    platform_label = "GitHub" if platform == GitPlatform.GITHUB else "Gitea"
+    try:
+        actions_url = f"{_get_active_server(config)}/{_get_active_repo(config)}/actions"
+    except Exception:
+        actions_url = "configure the active Git platform repo first"
     return (
         f"{str(err)}\n\n"
         f"Hints:\n"
         f"- Check that the training job created a log file at: {remote_log_path}\n"
         f"- Verify the Bridge workflow exists and can access the shared filesystem\n"
-        f"- View Gitea Actions at: {config.gitea_server}/{config.gitea_repo}/actions"
+        f"- View {platform_label} Actions at: {actions_url}"
     )
 
 

@@ -168,7 +168,7 @@ def list_hpc(
     "--priority",
     type=int,
     default=None,
-    help="Task priority 1-10 (default from config [job].priority or 6)",
+    help="Task priority 1-10 (default from config [job].priority or 10)",
 )
 @click.option("--number-of-tasks", type=int, default=1, show_default=True, help="Number of tasks")
 @click.option("--cpus-per-task", type=int, required=True, help="CPUs per task")

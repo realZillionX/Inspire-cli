@@ -61,8 +61,8 @@ def test_wait_for_bridge_action_completion_checks_last_page(monkeypatch: pytest.
     monkeypatch.setattr(forge_module.time, "time", lambda: 0)
     monkeypatch.setattr(forge_module.time, "sleep", lambda *_args, **_kwargs: None)
 
-    # Config needs gitea_repo set to avoid errors in _get_active_repo
-    config = Config(username="user", password="pass", gitea_repo="org/repo")
+    # Config needs a repo set to avoid errors in _get_active_repo
+    config = Config(username="user", password="pass", github_repo="org/repo")
 
     result = forge_module.wait_for_bridge_action_completion(
         config=config,
@@ -80,27 +80,27 @@ class TestGiteaClient:
 
     def test_auth_header(self):
         """Test that GiteaClient uses 'token' auth header."""
-        client = GiteaClient(token="test-token", server_url="https://codeberg.org")
+        client = GiteaClient(token="test-token", server_url="https://gitea.example.com")
         assert client.get_auth_header() == "token test-token"
 
     def test_api_base(self):
         """Test that GiteaClient uses correct API base path."""
-        client = GiteaClient(token="test-token", server_url="https://codeberg.org")
+        client = GiteaClient(token="test-token", server_url="https://gitea.example.com")
         assert (
             client.get_api_base("owner/repo")
-            == "https://codeberg.org/api/v1/repos/owner/repo/actions"
+            == "https://gitea.example.com/api/v1/repos/owner/repo/actions"
         )
 
     def test_raw_file_url(self):
         """Test that GiteaClient uses correct raw file URL format."""
-        client = GiteaClient(token="test-token", server_url="https://codeberg.org")
+        client = GiteaClient(token="test-token", server_url="https://gitea.example.com")
         assert client.get_raw_file_url("owner/repo", "main", "test.txt") == (
-            "https://codeberg.org/api/v1/repos/owner/repo/raw/main/test.txt"
+            "https://gitea.example.com/api/v1/repos/owner/repo/raw/main/test.txt"
         )
 
     def test_pagination_params(self):
         """Test that GiteaClient uses limit for pagination."""
-        client = GiteaClient(token="test-token", server_url="https://codeberg.org")
+        client = GiteaClient(token="test-token", server_url="https://gitea.example.com")
         assert client.get_pagination_params(20, 1) == "limit=20&page=1"
         assert client.get_pagination_params(50, 3) == "limit=50&page=3"
 
@@ -170,10 +170,10 @@ class TestTokenSanitization:
 class TestPlatformResolution:
     """Tests for platform resolution logic."""
 
-    def test_default_platform_is_gitea(self):
-        """Test that default platform is Gitea when nothing is configured."""
+    def test_default_platform_is_github(self):
+        """Test that default platform is GitHub when nothing is configured."""
         config = Config(username="user", password="pass")
-        assert _resolve_platform(config) == GitPlatform.GITEA
+        assert _resolve_platform(config) == GitPlatform.GITHUB
 
     def test_explicit_gitea_platform(self):
         """Test explicit Gitea platform selection."""
@@ -236,18 +236,18 @@ class TestPlatformResolution:
 class TestForgeClientFactory:
     """Tests for create_forge_client factory function."""
 
-    def test_creates_gitea_client_by_default(self):
-        """Test that factory creates GiteaClient by default."""
+    def test_creates_github_client_by_default(self):
+        """Test that factory creates GitHubClient by default."""
         config = Config(
             username="user",
             password="pass",
-            gitea_token="test-token",
-            gitea_server="https://codeberg.org",
+            github_token="ghp_test-token",
+            github_server="https://github.com",
         )
         client = create_forge_client(config)
-        assert isinstance(client, GiteaClient)
-        assert client.token == "test-token"
-        assert client.server_url == "https://codeberg.org"
+        assert isinstance(client, GitHubClient)
+        assert client.token == "ghp_test-token"
+        assert client.server_url == "https://github.com"
 
     def test_creates_github_client_when_platform_is_github(self):
         """Test that factory creates GitHubClient when platform is GitHub."""

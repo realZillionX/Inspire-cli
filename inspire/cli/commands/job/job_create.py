@@ -229,7 +229,7 @@ def run_job_create(
     "--priority",
     type=int,
     default=None,
-    help="Task priority 1-10 (default from config [job].priority or 6)",
+    help="Task priority 1-10 (default from config [job].priority or 10)",
 )
 @click.option("--max-time", type=float, default=100.0, help="Max runtime in hours (default: 100)")
 @click.option("--location", help="Preferred datacenter location")

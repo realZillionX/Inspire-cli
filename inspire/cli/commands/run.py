@@ -357,7 +357,7 @@ def _run_flow(
     "--priority",
     type=int,
     default=None,
-    help="Task priority 1-10 (default from config [job].priority or 6)",
+    help="Task priority 1-10 (default from config [job].priority or 10)",
 )
 @click.option(
     "--project",

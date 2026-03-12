@@ -266,7 +266,7 @@ class InspireAPI:
         entrypoint: str,
         spec_id: str,
         instance_count: int = 1,
-        task_priority: int = 6,
+        task_priority: int = 10,
         number_of_tasks: int = 1,
         cpus_per_task: int = 1,
         memory_per_cpu: int = 4,

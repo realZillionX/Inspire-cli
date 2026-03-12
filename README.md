@@ -321,7 +321,7 @@ rtunnel = "socks5://127.0.0.1:1080"
 | 变量                        | 说明                   | 默认值   |
 | --------------------------- | ---------------------- | -------- |
 | `INSP_IMAGE`                | 默认镜像               | —        |
-| `INSP_PRIORITY`             | 默认优先级（1-10）     | `6`      |
+| `INSP_PRIORITY`             | 默认优先级（1-10）     | `10`     |
 | `INSPIRE_NOTEBOOK_RESOURCE` | 默认 Notebook 资源规格 | `1xH200` |
 | `INSPIRE_NOTEBOOK_POST_START` | 默认 Notebook 启动后动作 | —      |
 
@@ -377,7 +377,7 @@ nohup /tmp/rtunnel 22222 31337 >/tmp/rtunnel-server.log 2>&1 &
 
 1. **OpenAPI**：Bearer Token（`POST /auth/token`），用于 `job`/`run`/`hpc`/`config check`。
 2. **Web SSO**：浏览器 CAS Cookie Session，用于 `notebook`/`image`/`resources`/`project`。
-3. **Git Platform**：Gitea/GitHub Token，用于 `job logs`/`sync --transport workflow`。
+3. **Git Platform**：GitHub/Gitea Token，用于 `job logs`/`sync --transport workflow`。
 
 `config check` 通过不代表 Web Session 或 Git Platform 链路可用。
 
