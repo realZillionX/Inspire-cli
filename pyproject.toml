@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inspire-cli"
-version = "0.2.8"
+version = "0.2.9"
 description = "CLI tool for the Inspire HPC training platform"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Proprietary - Inspire Platform Members Only"}
+license = "LicenseRef-Proprietary"
 authors = [
     {name = "Inspire Platform Team"}
 ]
@@ -18,7 +18,6 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -80,7 +79,7 @@ dev = [
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.2.8"
+version = "0.2.9"
 version_files = [
     "inspire/__init__.py:__version__",
     "pyproject.toml:^version"

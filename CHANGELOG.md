@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.9 (2026-03-12)
+
+### Fix
+
+- Replace deprecated setuptools license metadata with SPDX-compatible `LicenseRef-Proprietary` and remove the deprecated proprietary license classifier, so `uv build` completes without packaging deprecation warnings.
+
 ## v0.2.8 (2026-03-12)
 
 ### Fix
