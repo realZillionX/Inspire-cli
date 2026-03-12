@@ -72,7 +72,8 @@ def list_images_by_source(
             - ``"public"``: publicly visible images.
             - ``"private"``: personal-visible images in UI semantics
               (``visibility=VISIBILITY_PRIVATE`` across private/public source list).
-            - ``"my-private"``: direct ``SOURCE_PRIVATE`` images.
+              Deprecated hidden aliases still map to direct ``SOURCE_PRIVATE``
+              queries for backward compatibility.
         session: Existing web session.
     """
     source_map = {

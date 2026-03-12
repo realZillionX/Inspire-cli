@@ -44,8 +44,8 @@
 - `inspire notebook ssh` first-run bootstrap now uploads `rtunnel` via Jupyter Contents API when a local binary is available, then prefers Jupyter terminal WebSocket dispatch before falling back to Playwright terminal typing.
 - Offline / no-internet notebook bootstrap now skips impossible `curl` fallback paths when the runtime is using uploaded `rtunnel`, dropbear package trees, or apt-mirror bootstrap.
 - `inspire image list --source all` now tolerates per-source failures, returns partial results with warnings, and still fails only when all sources fail.
-- `inspire image list --source private` now matches UI "个人可见镜像" semantics (`visibility=VISIBILITY_PRIVATE` with combined private/public source list), and new `--source my-private` preserves direct `SOURCE_PRIVATE` queries for backward compatibility.
-- `inspire image list --source all` now aggregates `official/public/private/my-private` and deduplicates by `image_id`; partial image-ID resolution for `detail/delete` now scans the same source set to avoid lookup gaps.
+- `inspire image list --source private` now matches UI "个人可见镜像" semantics (`visibility=VISIBILITY_PRIVATE` with combined private/public source list).
+- `inspire image list --source all` now aggregates image source sets and deduplicates by `image_id`; partial image-ID resolution for `detail/delete` now scans the same source set to avoid lookup gaps.
 - Web-session request stack now supports `DELETE` in both requests and Playwright fallback clients, fixing `inspire image delete` failures caused by unsupported HTTP methods.
 - `inspire hpc create` now retries with backend-compatible payload fallbacks when clusters reject `task_priority`/`priority` fields or require string-typed `cpus_per_task` and `memory_per_cpu`.
 - CPU notebook compute-group selection now prefers `CPU资源-2` and `HPC-可上网区资源-2` when `gpu_count == 0`, avoiding accidental binding to generic `CPU资源`.

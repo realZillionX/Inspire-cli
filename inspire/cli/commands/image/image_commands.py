@@ -33,8 +33,21 @@ from inspire.platform.web import browser_api as browser_api_module
 # Helpers
 # ---------------------------------------------------------------------------
 
-_SOURCE_CHOICES = ("official", "public", "private", "my-private", "all")
+_PUBLIC_SOURCE_CHOICES = ("official", "public", "private", "all")
 _ALL_SOURCE_KEYS = ("official", "public", "private", "my-private")
+
+
+def _parse_source_value(
+    _ctx: click.Context, _param: click.Parameter, value: str
+) -> str:
+    """Parse image source values while keeping deprecated aliases hidden from help."""
+    normalized = value.strip().lower()
+    if normalized in _PUBLIC_SOURCE_CHOICES:
+        return normalized
+    if normalized == "my-private":
+        return normalized
+    allowed = ", ".join(_PUBLIC_SOURCE_CHOICES)
+    raise click.BadParameter(f"invalid source '{value}'. Choose one of: {allowed}")
 
 
 def _image_to_dict(img: browser_api_module.CustomImageInfo) -> dict:
@@ -120,7 +133,9 @@ def _resolve_image_id(
 @click.option(
     "--source",
     "-s",
-    type=click.Choice(_SOURCE_CHOICES, case_sensitive=False),
+    type=str,
+    callback=_parse_source_value,
+    metavar="[official|public|private|all]",
     default="official",
     show_default=True,
     help="Image source filter",
@@ -143,7 +158,6 @@ def list_images_cmd(
     Examples:
         inspire image list                     # Official images
         inspire image list --source private    # Personal-visible images
-        inspire image list --source my-private # Direct SOURCE_PRIVATE images
         inspire image list --source all        # All sources
         inspire image list --source all --json # JSON output
     """
