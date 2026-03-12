@@ -180,12 +180,23 @@ def patch_config_and_auth(
     class FakeWebSession:
         workspace_id = "ws-test-workspace"
         storage_state = {}
+        all_workspace_ids = ["ws-test-workspace", "ws-gpu", "ws-cpu"]
+        all_workspace_names = {
+            "ws-test-workspace": "Test Workspace",
+            "ws-gpu": "分布式训练空间",
+            "ws-cpu": "CPU资源空间",
+        }
 
     monkeypatch.setattr(
         web_session_module,
         "get_web_session",
         lambda: FakeWebSession(),
     )
+    from inspire.cli.commands.resources import resources_list as resources_list_module
+    from inspire.cli.commands.resources import resources_nodes as resources_nodes_module
+
+    monkeypatch.setattr(resources_list_module, "get_web_session", lambda: FakeWebSession())
+    monkeypatch.setattr(resources_nodes_module, "get_web_session", lambda: FakeWebSession())
 
     test_project = browser_api_module.ProjectInfo(
         project_id="project-test-123",
@@ -224,8 +235,8 @@ def test_global_json_flag_with_resources_list(monkeypatch: pytest.MonkeyPatch, t
     test_group_id = "lcg-test000-0000-0000-0000-000000000000"
     monkeypatch.setattr(
         browser_api_module,
-        "get_accurate_gpu_availability",
-        lambda: [
+        "get_accurate_resource_availability",
+        lambda **kwargs: [  # noqa: ARG005
             browser_api_module.GPUAvailability(
                 group_id=test_group_id,
                 group_name="H200 TestRoom",
@@ -254,8 +265,8 @@ def test_global_debug_flag_runs_subcommand(monkeypatch: pytest.MonkeyPatch, tmp_
 
     monkeypatch.setattr(
         browser_api_module,
-        "get_accurate_gpu_availability",
-        lambda: [],
+        "get_accurate_resource_availability",
+        lambda **kwargs: [],  # noqa: ARG005
     )
     runner = CliRunner()
 
@@ -1070,11 +1081,11 @@ def test_nodes_list_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             )
         ],
     )
-    # Also mock get_accurate_gpu_availability which is called by the nodes command
+    # Also mock get_accurate_resource_availability which is called by the nodes command
     monkeypatch.setattr(
         browser_api_module,
-        "get_accurate_gpu_availability",
-        lambda workspace_id=None, session=None, _retry=True: [  # noqa: ARG005
+        "get_accurate_resource_availability",
+        lambda workspace_id=None, session=None, include_cpu=False, all_workspaces=False, _retry=True: [  # noqa: ARG005
             browser_api_module.GPUAvailability(
                 group_id=test_group_id,
                 group_name="H200 TestRoom",
@@ -1094,6 +1105,72 @@ def test_nodes_list_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     data = json.loads(result.output)
     assert data["data"]["groups"]
     assert data["data"]["total_full_free_nodes"] == 3
+
+
+def test_resources_list_all_workspaces_and_cpu_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    patch_config_and_auth(monkeypatch, tmp_path, include_compute_groups=True)
+    from inspire.platform.web import browser_api as browser_api_module
+
+    captured: dict[str, object] = {}
+
+    def _fake_get_accurate_resource_availability(**kwargs):
+        captured.update(kwargs)
+        return [
+            browser_api_module.GPUAvailability(
+                group_id="lcg-h100",
+                group_name="cuda12.8版本H100",
+                gpu_type="NVIDIA H100 (80GB)",
+                total_gpus=128,
+                used_gpus=64,
+                available_gpus=64,
+                low_priority_gpus=8,
+                workspace_id="ws-gpu",
+                workspace_name="分布式训练空间",
+                cpu_total=2048,
+                cpu_used=1024,
+                cpu_available=1024,
+                resource_kind="gpu",
+            ),
+            browser_api_module.GPUAvailability(
+                group_id="lcg-cpu",
+                group_name="CPU资源-2",
+                gpu_type="",
+                total_gpus=0,
+                used_gpus=0,
+                available_gpus=0,
+                low_priority_gpus=0,
+                workspace_id="ws-cpu",
+                workspace_name="CPU资源空间",
+                cpu_total=1200,
+                cpu_used=200,
+                cpu_available=1000,
+                memory_total_gib=4000,
+                memory_used_gib=500,
+                memory_available_gib=3500,
+                resource_kind="cpu",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        browser_api_module,
+        "get_accurate_resource_availability",
+        _fake_get_accurate_resource_availability,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["--json", "resources", "list", "--all", "--include-cpu"])
+    assert result.exit_code == 0
+
+    payload = json.loads(result.output)
+    rows = payload["data"]["availability"]
+    assert payload["success"] is True
+    assert captured["all_workspaces"] is True
+    assert captured["include_cpu"] is True
+    assert {row["resource_kind"] for row in rows} == {"gpu", "cpu"}
+    assert any(row["workspace_name"] == "分布式训练空间" for row in rows)
+    assert any(row["cpu_total"] == 1200 for row in rows)
 
 
 def test_config_check_auth_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

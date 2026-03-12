@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.11 (2026-03-12)
+
+### Fix
+
+- `inspire resources list --all` now aggregates across all visible workspaces instead of only the session's current workspace, so `H100` / `H200` groups are visible without manual `INSPIRE_WORKSPACE_ID` overrides.
+- Added `inspire resources list --include-cpu`, which surfaces CPU-only compute groups with platform-reported CPU and memory totals/usage.
+- `inspire resources nodes` now supports cross-workspace queries via `--all` and explicit workspace overrides via `--workspace-name` / `--workspace-id`.
+
 ## v0.2.10 (2026-03-12)
 
 ### Fix

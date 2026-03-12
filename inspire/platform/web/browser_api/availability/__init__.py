@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .api import (
+    get_accurate_resource_availability,
     get_accurate_gpu_availability,
     get_full_free_node_counts,
     list_compute_groups,
@@ -14,6 +15,7 @@ __all__ = [
     "FullFreeNodeCount",
     "GPUAvailability",
     "find_best_compute_group_accurate",
+    "get_accurate_resource_availability",
     "get_accurate_gpu_availability",
     "get_full_free_node_counts",
     "list_compute_groups",

@@ -144,8 +144,8 @@ inspire notebook ssh <id>                       # SSH into instance (auto-establ
 
 | Command                   | Description                          |
 | ------------------------- | ------------------------------------ |
-| `inspire resources list`  | View GPU availability                |
-| `inspire resources nodes` | View node status                     |
+| `inspire resources list`  | View real-time compute-group availability (GPU by default, optional CPU totals) |
+| `inspire resources nodes` | View full-free GPU nodes (supports cross-workspace queries) |
 | `inspire resources specs` | Query compute group specs (`--json`) |
 | `inspire project list`    | View projects and quotas             |
 
@@ -174,8 +174,21 @@ inspire notebook top --watch
 inspire bridge scp ./model.py /tmp/model.py --bridge mybridge
 inspire bridge scp -d /tmp/checkpoints/ ./checkpoints/ -r --bridge mybridge
 
-# Check GPU availability and project quota
+# Check GPU availability in the current workspace
 inspire resources list
+
+# Check GPU groups across all visible workspaces
+inspire resources list --all
+
+# Check GPU + CPU-only groups across all visible workspaces
+inspire resources list --all --include-cpu
+
+# Target a specific workspace explicitly
+inspire resources list --workspace-name 分布式训练空间
+
+# Check full-free 8-GPU nodes across workspaces
+inspire resources nodes --all
+
 inspire project list
 
 # Query default specs (auto: prefer HPC, fall back to notebook)

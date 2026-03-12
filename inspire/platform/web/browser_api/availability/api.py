@@ -43,74 +43,151 @@ def list_compute_groups(
     return data.get("data", {}).get("logic_compute_groups", [])
 
 
+def _resolve_workspace_targets(
+    session: WebSession,
+    workspace_id: Optional[str],
+    *,
+    all_workspaces: bool,
+) -> list[str]:
+    if workspace_id:
+        return [workspace_id]
+
+    if all_workspaces and session.all_workspace_ids:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for wid in session.all_workspace_ids:
+            if wid and wid not in seen:
+                seen.add(wid)
+                ordered.append(wid)
+        if ordered:
+            return ordered
+
+    return [session.workspace_id or DEFAULT_WORKSPACE_ID]
+
+
+def get_accurate_resource_availability(
+    workspace_id: Optional[str] = None,
+    session: Optional[WebSession] = None,
+    *,
+    include_cpu: bool = False,
+    all_workspaces: bool = False,
+    _retry: bool = True,
+) -> list[GPUAvailability]:
+    """Get accurate compute-group availability, optionally including CPU-only groups."""
+    if session is None:
+        session = get_web_session()
+
+    workspace_ids = _resolve_workspace_targets(
+        session,
+        workspace_id,
+        all_workspaces=all_workspaces,
+    )
+    workspace_names = session.all_workspace_names or {}
+
+    try:
+        results: list[GPUAvailability] = []
+        for wid in workspace_ids:
+            groups = list_compute_groups(workspace_id=wid, session=session)
+            workspace_name = workspace_names.get(wid, "")
+
+            for group in groups:
+                group_id = group["logic_compute_group_id"]
+                group_name = group["name"]
+
+                try:
+                    data = _request_json(
+                        session,
+                        "GET",
+                        _browser_api_path(f"/compute_resources/logic_compute_groups/{group_id}"),
+                        referer=f"{_get_base_url()}/jobs/distributedTraining",
+                        timeout=30,
+                    )
+                except SessionExpiredError:
+                    raise
+                except ValueError:
+                    continue
+
+                resources = data.get("data", {}).get("logic_resouces", {})
+                gpu_stats = data.get("data", {}).get("gpu_type_stats", [{}])
+
+                gpu_type = ""
+                if gpu_stats:
+                    gpu_type = gpu_stats[0].get("gpu_info", {}).get("gpu_type_display", "Unknown")
+
+                gpu_total = int(resources.get("gpu_total", 0) or 0)
+                gpu_used = int(resources.get("gpu_used", 0) or 0)
+                gpu_low_priority = int(resources.get("gpu_low_priority_used", 0) or 0)
+                gpu_available = gpu_total - gpu_used
+
+                cpu_total = float(resources.get("cpu_total", 0) or 0)
+                cpu_used = float(resources.get("cpu_used", 0) or 0)
+                cpu_available = cpu_total - cpu_used
+
+                memory_total_gib = float(resources.get("memory_gi_total", 0) or 0)
+                memory_used_gib = float(resources.get("memory_gi_used", 0) or 0)
+                memory_available_gib = memory_total_gib - memory_used_gib
+
+                resource_kind = "gpu" if gpu_total > 0 else "cpu"
+                if resource_kind == "cpu" and not include_cpu:
+                    continue
+                if resource_kind == "cpu":
+                    has_any_cpu_signal = any(
+                        value > 0
+                        for value in (cpu_total, cpu_used, memory_total_gib, memory_used_gib)
+                    )
+                    if not has_any_cpu_signal:
+                        continue
+
+                results.append(
+                    GPUAvailability(
+                        group_id=group_id,
+                        group_name=group_name,
+                        gpu_type=gpu_type,
+                        total_gpus=gpu_total,
+                        used_gpus=gpu_used,
+                        available_gpus=gpu_available,
+                        low_priority_gpus=gpu_low_priority,
+                        workspace_id=wid,
+                        workspace_name=workspace_name,
+                        cpu_total=cpu_total,
+                        cpu_used=cpu_used,
+                        cpu_available=cpu_available,
+                        memory_total_gib=memory_total_gib,
+                        memory_used_gib=memory_used_gib,
+                        memory_available_gib=memory_available_gib,
+                        resource_kind=resource_kind,
+                    )
+                )
+
+        return results
+
+    except SessionExpiredError:
+        if _retry:
+            clear_session_cache()
+            return get_accurate_resource_availability(
+                workspace_id=workspace_id,
+                session=None,
+                include_cpu=include_cpu,
+                all_workspaces=all_workspaces,
+                _retry=False,
+            )
+        raise
+
+
 def get_accurate_gpu_availability(
     workspace_id: Optional[str] = None,
     session: Optional[WebSession] = None,
     _retry: bool = True,
 ) -> list[GPUAvailability]:
     """Get accurate GPU availability for all compute groups."""
-    if session is None:
-        session = get_web_session()
-
-    if workspace_id is None:
-        workspace_id = session.workspace_id or DEFAULT_WORKSPACE_ID
-
-    try:
-        groups = list_compute_groups(workspace_id=workspace_id, session=session)
-    except SessionExpiredError:
-        if _retry:
-            clear_session_cache()
-            return get_accurate_gpu_availability(
-                workspace_id=workspace_id,
-                session=None,
-                _retry=False,
-            )
-        raise
-
-    results: list[GPUAvailability] = []
-
-    for group in groups:
-        group_id = group["logic_compute_group_id"]
-        group_name = group["name"]
-
-        try:
-            data = _request_json(
-                session,
-                "GET",
-                _browser_api_path(f"/compute_resources/logic_compute_groups/{group_id}"),
-                referer=f"{_get_base_url()}/jobs/distributedTraining",
-                timeout=30,
-            )
-        except SessionExpiredError:
-            raise
-        except ValueError:
-            continue
-
-        resources = data.get("data", {}).get("logic_resouces", {})
-        gpu_stats = data.get("data", {}).get("gpu_type_stats", [{}])
-
-        gpu_type = ""
-        if gpu_stats:
-            gpu_type = gpu_stats[0].get("gpu_info", {}).get("gpu_type_display", "Unknown")
-
-        gpu_total = resources.get("gpu_total", 0)
-        gpu_used = resources.get("gpu_used", 0)
-        gpu_low_priority = resources.get("gpu_low_priority_used", 0)
-        gpu_available = gpu_total - gpu_used
-
-        results.append(
-            GPUAvailability(
-                group_id=group_id,
-                group_name=group_name,
-                gpu_type=gpu_type,
-                total_gpus=gpu_total,
-                used_gpus=gpu_used,
-                available_gpus=gpu_available,
-                low_priority_gpus=gpu_low_priority,
-            )
-        )
-
-    return results
+    results = get_accurate_resource_availability(
+        workspace_id=workspace_id,
+        session=session,
+        include_cpu=False,
+        all_workspaces=False,
+        _retry=_retry,
+    )
+    return [row for row in results if row.resource_kind == "gpu"]
 
 
 def get_full_free_node_counts(
@@ -194,6 +271,7 @@ def get_full_free_node_counts(
 
 
 __all__ = [
+    "get_accurate_resource_availability",
     "get_accurate_gpu_availability",
     "get_full_free_node_counts",
     "list_compute_groups",
