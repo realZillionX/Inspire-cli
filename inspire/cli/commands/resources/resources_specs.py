@@ -22,6 +22,7 @@ from inspire.platform.web.session import SessionExpiredError, get_web_session
 
 
 _USAGE_SCHEDULE_TYPES = {
+    "auto": ("SCHEDULE_CONFIG_TYPE_HPC", "SCHEDULE_CONFIG_TYPE_DSW"),
     "notebook": ("SCHEDULE_CONFIG_TYPE_DSW",),
     "hpc": ("SCHEDULE_CONFIG_TYPE_HPC",),
     "all": ("SCHEDULE_CONFIG_TYPE_DSW", "SCHEDULE_CONFIG_TYPE_HPC"),
@@ -67,8 +68,12 @@ def _usage_from_schedule_type(schedule_config_type: str) -> str:
 
 
 def _usage_sort_key(usage: str) -> int:
-    order = {"notebook": 0, "hpc": 1}
+    order = {"auto": 0, "hpc": 1, "notebook": 2}
     return order.get(usage, 99)
+
+
+def _should_stop_after_match(usage: str) -> bool:
+    return usage == "auto"
 
 
 @click.command("specs")
@@ -77,8 +82,8 @@ def _usage_sort_key(usage: str) -> int:
 @click.option("--group", default=None, help="Filter by compute group name (partial match)")
 @click.option(
     "--usage",
-    type=click.Choice(["notebook", "hpc", "all"], case_sensitive=False),
-    default="notebook",
+    type=click.Choice(["auto", "notebook", "hpc", "all"], case_sensitive=False),
+    default="auto",
     show_default=True,
     help="Spec family to query",
 )
@@ -132,6 +137,7 @@ def list_specs(
             if group_filter and group_filter not in compute_group_name.lower():
                 continue
 
+            matched_any = False
             for schedule_config_type in schedule_types:
                 prices = browser_api_module.get_resource_prices(
                     workspace_id=workspace_id,
@@ -142,7 +148,7 @@ def list_specs(
                 usage_label = _usage_from_schedule_type(schedule_config_type)
 
                 if not prices:
-                    if include_empty:
+                    if include_empty and usage != "auto":
                         empty_key = (
                             logic_compute_group_id,
                             usage_label,
@@ -202,6 +208,39 @@ def list_specs(
                             "gpu_count": gpu_count,
                             "gpu_type": gpu_type,
                             "total_price_per_hour": price.get("total_price_per_hour", 0),
+                        }
+                    )
+                matched_any = True
+                if _should_stop_after_match(usage):
+                    break
+
+            if matched_any:
+                continue
+            if include_empty and usage == "auto":
+                empty_key = (
+                    logic_compute_group_id,
+                    "auto",
+                    "",
+                    0,
+                    0,
+                    0,
+                    "",
+                )
+                if empty_key not in seen_rows:
+                    seen_rows.add(empty_key)
+                    rows.append(
+                        {
+                            "workspace_id": workspace_id,
+                            "usage": "auto",
+                            "schedule_config_type": "",
+                            "compute_group_name": compute_group_name,
+                            "logic_compute_group_id": logic_compute_group_id,
+                            "spec_id": "",
+                            "cpu_count": 0,
+                            "memory_size_gib": 0,
+                            "gpu_count": 0,
+                            "gpu_type": "",
+                            "total_price_per_hour": 0,
                         }
                     )
 
@@ -271,6 +310,8 @@ def list_specs(
             click.echo("Use spec_id with: inspire hpc create --spec-id <spec_id>")
         elif usage == "all":
             click.echo("Use --usage notebook for notebook quotas and --usage hpc for HPC predef quotas.")
+        elif usage == "auto":
+            click.echo("Auto mode prefers HPC predef quotas and falls back to notebook quotas when HPC is unavailable.")
         else:
             click.echo("Use --usage hpc to discover HPC predef quotas for inspire hpc create.")
         click.echo("")

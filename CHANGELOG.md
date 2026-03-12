@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.10 (2026-03-12)
+
+### Fix
+
+- `inspire resources specs` now defaults to `--usage auto`, which prefers real HPC `predef_node_specs` and only falls back to notebook/DSW quotas when HPC specs are unavailable. This fixes misleading defaults such as `HPC-可上网区资源-2` showing `55 CPU` instead of `40 CPU`, and `CPU资源-2` showing `55 CPU` instead of the actual `120 CPU` HPC tier.
+
 ## v0.2.9 (2026-03-12)
 
 ### Fix
