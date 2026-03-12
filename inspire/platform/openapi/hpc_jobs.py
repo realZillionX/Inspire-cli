@@ -20,6 +20,12 @@ def _is_string_field_type_error(message: str, field_name: str) -> bool:
     return "invalidvalueforstringfield" in compact and field_name.lower() in compact
 
 
+def _is_invalid_hpc_spec_error(message: str) -> bool:
+    """Return True when backend rejects a non-HPC quota as spec_id."""
+    lower = (message or "").lower()
+    return "spec_id" in lower and "predef_node_specs" in lower and "not found" in lower
+
+
 def create_hpc_job(
     api,  # noqa: ANN001
     *,
@@ -141,6 +147,12 @@ def create_hpc_job(
     error_code = result.get("code")
     error_msg = result.get("message", "Unknown error")
     friendly_msg = _translate_api_error(error_code, error_msg)
+    if _is_invalid_hpc_spec_error(error_msg):
+        friendly_msg = (
+            f"{friendly_msg}. Hint: HPC requires the predef_quota_id, not the notebook quota_id. "
+            "Run `inspire resources specs --usage hpc --workspace ... --group ...` or inspect "
+            "`inspire --json hpc status <job_id>` -> `slurm_cluster_spec.predef_quota_id`."
+        )
     raise InspireAPIError(f"Failed to create HPC job: {friendly_msg}")
 
 

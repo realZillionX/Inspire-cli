@@ -220,13 +220,19 @@ def get_notebook_schedule(
 def get_resource_prices(
     workspace_id: Optional[str] = None,
     logic_compute_group_id: str = "",
+    schedule_config_type: str = "SCHEDULE_CONFIG_TYPE_DSW",
     session: Optional[WebSession] = None,
 ) -> list[dict]:
-    """Fetch resource spec prices for a compute group.
+    """Fetch resource spec prices for a compute group and schedule type.
 
     The UI calls this endpoint when the user opens the resource spec dialog.
     Returns a list of price entries, each containing quota_id, cpu_count,
     memory_size_gib, gpu_count, gpu_info, and price.
+
+    Known schedule types:
+    - SCHEDULE_CONFIG_TYPE_DSW: notebook/DSW quotas
+    - SCHEDULE_CONFIG_TYPE_HPC: HPC/Slurm predef_node_specs
+    - SCHEDULE_CONFIG_TYPE_TRAIN: training-job framework specs
     """
     session, workspace_id = _get_session_and_workspace_id(
         workspace_id=workspace_id, session=session
@@ -234,7 +240,7 @@ def get_resource_prices(
 
     body = {
         "workspace_id": workspace_id,
-        "schedule_config_type": "SCHEDULE_CONFIG_TYPE_DSW",
+        "schedule_config_type": schedule_config_type,
         "logic_compute_group_id": logic_compute_group_id,
     }
 

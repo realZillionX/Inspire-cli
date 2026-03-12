@@ -97,6 +97,25 @@ def test_hpc_create_raises_for_unrelated_error() -> None:
     assert len(api.calls) == 1
 
 
+def test_hpc_create_invalid_spec_error_includes_hpc_hint() -> None:
+    api = _DummyAPI(
+        responses=[
+            {
+                "code": -100000,
+                "message": "spec_id spec-demo not found in workspace predef_node_specs",
+            },
+        ]
+    )
+
+    with pytest.raises(InspireAPIError) as exc_info:
+        _invoke(api)
+
+    message = str(exc_info.value)
+    assert "resources specs --usage hpc" in message
+    assert "predef_quota_id" in message
+    assert len(api.calls) == 1
+
+
 def test_hpc_create_retries_with_string_cpu_memory_fields() -> None:
     api = _DummyAPI(
         responses=[

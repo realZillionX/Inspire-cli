@@ -148,7 +148,11 @@ def list_hpc(
     required=True,
     help="Compute group ID (logic_compute_group_id)",
 )
-@click.option("--spec-id", required=True, help="Spec ID")
+@click.option(
+    "--spec-id",
+    required=True,
+    help="HPC spec ID (predef_quota_id; use inspire resources specs --usage hpc)",
+)
 @click.option(
     "--project",
     "-p",

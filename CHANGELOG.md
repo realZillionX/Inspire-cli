@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.8 (2026-03-12)
+
+### Fix
+
+- `inspire resources specs` now supports `--usage hpc` and queries `SCHEDULE_CONFIG_TYPE_HPC`, so HPC jobs return the real `predef_quota_id` instead of notebook/DSW quotas.
+- `inspire hpc create` now adds an explicit hint when a notebook quota is passed as `--spec-id`, pointing users to `resources specs --usage hpc` and `hpc status` for recovery.
+
 ## v0.2.7 (2026-03-09)
 
 ### Fix

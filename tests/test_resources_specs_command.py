@@ -51,6 +51,8 @@ def test_resources_specs_json(
 
     def _fake_prices(**kwargs):
         gid = kwargs["logic_compute_group_id"]
+        schedule = kwargs["schedule_config_type"]
+        assert schedule == "SCHEDULE_CONFIG_TYPE_DSW"
         if gid == "lcg-cpu-2":
             return [
                 {
@@ -80,8 +82,11 @@ def test_resources_specs_json(
     payload = json.loads(result.output)
     assert payload["success"] is True
     assert payload["data"]["workspace_id"] == "ws-00000000-0000-0000-0000-000000000003"
+    assert payload["data"]["usage_filter"] == "notebook"
     assert payload["data"]["total"] == 2
     first = payload["data"]["specs"][0]
+    assert first["usage"] == "notebook"
+    assert first["schedule_config_type"] == "SCHEDULE_CONFIG_TYPE_DSW"
     assert "logic_compute_group_id" in first
     assert "spec_id" in first
     assert "cpu_count" in first
@@ -109,7 +114,11 @@ def test_resources_specs_include_empty(
             {"logic_compute_group_id": "lcg-empty", "name": "Empty Group"},
         ],
     )
-    monkeypatch.setattr(specs_module.browser_api_module, "get_resource_prices", lambda **kwargs: [])
+    monkeypatch.setattr(
+        specs_module.browser_api_module,
+        "get_resource_prices",
+        lambda **kwargs: [],
+    )
 
     runner = CliRunner()
     result = runner.invoke(cli_main, ["--json", "resources", "specs", "--include-empty"])
@@ -119,5 +128,70 @@ def test_resources_specs_include_empty(
     assert payload["success"] is True
     assert payload["data"]["total"] == 1
     row = payload["data"]["specs"][0]
+    assert row["usage"] == "notebook"
+    assert row["schedule_config_type"] == "SCHEDULE_CONFIG_TYPE_DSW"
     assert row["logic_compute_group_id"] == "lcg-empty"
     assert row["spec_id"] == ""
+
+
+def test_resources_specs_hpc_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_config(monkeypatch, tmp_path)
+
+    from inspire.cli.commands.resources import resources_specs as specs_module
+
+    class _DummySession:
+        workspace_id = "ws-session-default"
+
+    monkeypatch.setattr(specs_module, "get_web_session", lambda: _DummySession())
+    monkeypatch.setattr(
+        specs_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda **kwargs: [
+            {"logic_compute_group_id": "lcg-hpc-2", "name": "HPC-可上网区资源-2"},
+        ],
+    )
+
+    calls: list[str] = []
+
+    def _fake_prices(**kwargs):
+        calls.append(kwargs["schedule_config_type"])
+        assert kwargs["logic_compute_group_id"] == "lcg-hpc-2"
+        return [
+            {
+                "quota_id": "quota-hpc-40-200",
+                "cpu_count": 40,
+                "memory_size_gib": 200,
+                "gpu_count": 0,
+                "gpu_info": {"gpu_type_display": "CPU"},
+            }
+        ]
+
+    monkeypatch.setattr(specs_module.browser_api_module, "get_resource_prices", _fake_prices)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "--json",
+            "resources",
+            "specs",
+            "--workspace",
+            "分布式训练空间",
+            "--usage",
+            "hpc",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["success"] is True
+    assert payload["data"]["usage_filter"] == "hpc"
+    assert payload["data"]["total"] == 1
+    row = payload["data"]["specs"][0]
+    assert row["usage"] == "hpc"
+    assert row["schedule_config_type"] == "SCHEDULE_CONFIG_TYPE_HPC"
+    assert row["spec_id"] == "quota-hpc-40-200"
+    assert calls == ["SCHEDULE_CONFIG_TYPE_HPC"]

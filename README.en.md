@@ -106,7 +106,7 @@ inspire notebook ssh <id>                       # SSH into instance (auto-establ
 | `inspire hpc status <id>` | View HPC job details   |
 | `inspire hpc stop <id>`   | Stop HPC job           |
 
-> **Note:** `hpc create`'s `--spec-id` must use `quota_id`. Obtain via `inspire resources specs` (output includes `quota_id`) or from `inspire --json hpc status <job_id>`. `--image` must be a full docker address.
+> **Note:** `hpc create`'s `--spec-id` must use the HPC `predef_quota_id`. Prefer `inspire resources specs --usage hpc`, or extract it from `inspire --json hpc status <job_id>` → `slurm_cluster_spec.predef_quota_id`. The default `resources specs` output is notebook/DSW quota data, so do not reuse it for HPC jobs. `--image` must be a full docker address.
 
 ### Image Management
 
@@ -178,8 +178,11 @@ inspire bridge scp -d /tmp/checkpoints/ ./checkpoints/ -r --bridge mybridge
 inspire resources list
 inspire project list
 
-# Query compute group specs
-inspire resources specs --workspace CPU资源空间 --group HPC-可上网区资源-2 --json
+# Query notebook specs
+inspire resources specs --workspace CPU资源空间 --group CPU资源-2 --json
+
+# Query HPC specs
+inspire resources specs --workspace CPU资源空间 --group HPC-可上网区资源-2 --usage hpc --json
 ```
 
 ---
@@ -363,7 +366,8 @@ nohup /tmp/rtunnel 22222 31337 >/tmp/rtunnel-server.log 2>&1 &
 
 ## HPC Job Notes
 
-- `--spec-id` must use `quota_id`. Obtain via `inspire resources specs` (output includes `quota_id`) or from `inspire --json hpc status <job_id>` → `slurm_cluster_spec.predef_quota_id`.
+- `--spec-id` must use the HPC `predef_quota_id`. Prefer `inspire resources specs --usage hpc`, or read it from `inspire --json hpc status <job_id>` → `slurm_cluster_spec.predef_quota_id`.
+- `inspire resources specs` defaults to notebook/DSW quotas; add `--usage hpc` to query the HPC `predef_node_specs` set.
 - `--image` must be a full docker address (e.g., `docker.sii.shaipower.online/inspire-studio/<name>:<version>`).
 - `memory_per_cpu` is sent as a string with `G` suffix; `cpus_per_task` as a string — matching OpenAPI spec.
 - Built-in exponential backoff retry on `429 Too Many Requests`.
