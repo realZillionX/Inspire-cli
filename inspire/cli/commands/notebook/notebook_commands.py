@@ -51,7 +51,9 @@ from inspire.platform.web import session as web_session_module
 from inspire.platform.web.browser_api import NotebookFailedError
 
 
-def _call_with_module_overrides(module, overrides: dict[str, object], func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _call_with_module_overrides(
+    module, overrides: dict[str, object], func, *args, **kwargs
+):  # noqa: ANN001, ANN002, ANN003
     original = {name: getattr(module, name) for name in overrides}
     for name, value in overrides.items():
         setattr(module, name, value)
@@ -791,8 +793,7 @@ def list_notebooks(
 @click.option(
     "--command",
     help=(
-        "Optional non-interactive remote command to run "
-        "(if omitted, opens an interactive shell)"
+        "Optional non-interactive remote command to run " "(if omitted, opens an interactive shell)"
     ),
 )
 @click.option(
@@ -804,6 +805,12 @@ def list_notebooks(
 @click.option(
     "--rtunnel-bin",
     help="Path to pre-cached rtunnel binary (e.g., /inspire/.../rtunnel)",
+)
+@click.option(
+    "--rtunnel-upload-policy",
+    type=click.Choice(["auto", "never", "always"], case_sensitive=False),
+    default=None,
+    help="Rtunnel upload fallback: auto, never, or always",
 )
 @click.option(
     "--debug-playwright",
@@ -829,6 +836,7 @@ def ssh_notebook_cmd(
     command: Optional[str],
     command_timeout: Optional[int],
     rtunnel_bin: Optional[str],
+    rtunnel_upload_policy: Optional[str],
     debug_playwright: bool,
     setup_timeout: int,
 ) -> None:
@@ -844,6 +852,7 @@ def ssh_notebook_cmd(
         command=command,
         command_timeout=command_timeout,
         rtunnel_bin=rtunnel_bin,
+        rtunnel_upload_policy=rtunnel_upload_policy,
         debug_playwright=debug_playwright,
         setup_timeout=setup_timeout,
     )

@@ -10,8 +10,10 @@ import pytest
 from inspire.platform.web.browser_api import rtunnel as rtunnel_module
 from inspire.platform.web.browser_api.rtunnel import (
     _CONTENTS_API_RTUNNEL_FILENAME,
+    SETUP_DONE_MARKER,
     _StepTimer,
     _build_batch_setup_script,
+    _compute_rtunnel_hash,
     _build_terminal_websocket_url,
     _create_terminal_via_api,
     _delete_terminal_via_api,
@@ -20,9 +22,12 @@ from inspire.platform.web.browser_api.rtunnel import (
     _focus_terminal_input,
     _jupyter_server_base,
     _open_or_create_terminal,
+    _resolve_rtunnel_binary,
+    _rtunnel_matches_on_notebook,
     _send_setup_command_via_terminal_ws,
     _send_terminal_command_via_websocket,
     _upload_rtunnel_via_contents_api,
+    _upload_rtunnel_hash_sidecar,
     _verify_terminal_focus,
     _wait_for_setup_completion,
     _wait_for_terminal_surface,
@@ -270,6 +275,29 @@ def test_send_terminal_command_via_websocket_success() -> None:
     assert captured["payload"]["promptTimeoutMs"] == 734
 
 
+def test_send_terminal_command_via_websocket_completion_marker() -> None:
+    captured: dict = {}
+
+    class _EvalPage:
+        def evaluate(self, script: str, payload: dict):  # noqa: ANN201
+            captured["script"] = script
+            captured["payload"] = payload
+            return True
+
+    page = _EvalPage()
+    result = _send_terminal_command_via_websocket(
+        page,
+        ws_url="wss://example.test/terminals/websocket/1",
+        command="echo hi",
+        timeout_ms=5000,
+        completion_marker=SETUP_DONE_MARKER,
+    )
+
+    assert result is True
+    assert captured["payload"]["marker"] == SETUP_DONE_MARKER
+    assert captured["payload"]["timeoutMs"] == 5000
+
+
 def test_send_terminal_command_via_websocket_exception() -> None:
     class _BrokenPage:
         def evaluate(self, script: str, payload: dict):  # noqa: ANN201
@@ -302,6 +330,7 @@ def test_send_setup_command_via_terminal_ws_cleans_up_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[tuple[str, str]] = []
+    ws_call: dict[str, object] = {}
 
     class _Frame:
         url = "https://nb.example.com/lab"
@@ -312,10 +341,16 @@ def test_send_setup_command_via_terminal_ws_cleans_up_terminal(
         "_build_terminal_websocket_url",
         lambda _url, _term: "wss://nb.example.com/terminals/websocket/term-1",
     )
+
+    def fake_send_terminal_command_via_websocket(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        ws_call.update(kwargs)
+        events.append(("send", "ok"))
+        return True
+
     monkeypatch.setattr(
         rtunnel_module,
         "_send_terminal_command_via_websocket",
-        lambda *_a, **_k: events.append(("send", "ok")) or True,
+        fake_send_terminal_command_via_websocket,
     )
     monkeypatch.setattr(
         rtunnel_module,
@@ -330,6 +365,8 @@ def test_send_setup_command_via_terminal_ws_cleans_up_terminal(
     )
     assert ("send", "ok") in events
     assert ("delete", "https://nb.example.com/lab|term-1") in events
+    assert ws_call["timeout_ms"] == 120000
+    assert ws_call["completion_marker"] == SETUP_DONE_MARKER
 
 
 def test_send_setup_command_via_terminal_ws_cleans_up_on_failure(
@@ -1101,6 +1138,231 @@ def test_upload_rtunnel_via_contents_api_network_error(tmp_path: Path) -> None:
 
     result = _upload_rtunnel_via_contents_api(ctx, "https://nb.example.com/lab", binary)
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# hash helpers + upload resolution
+# ---------------------------------------------------------------------------
+
+
+class _DummyContentsGetResponse:
+    def __init__(self, status: int, payload: dict | None = None) -> None:
+        self.status = status
+        self._payload = payload or {}
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _DummyContentsRequest:
+    def __init__(
+        self,
+        *,
+        get_responses: list[_DummyContentsGetResponse] | None = None,
+        put_status: int = 201,
+    ) -> None:
+        self._get_responses = list(get_responses or [])
+        self.get_calls: list[tuple[str, int]] = []
+        self.put_calls: list[tuple[str, dict | None, dict | None, int]] = []
+        self.put_status = put_status
+
+    def get(self, url: str, timeout: int = 0) -> _DummyContentsGetResponse:
+        self.get_calls.append((url, timeout))
+        if not self._get_responses:
+            raise AssertionError("unexpected GET request")
+        return self._get_responses.pop(0)
+
+    def put(
+        self,
+        url: str,
+        headers: dict | None = None,
+        data: dict | None = None,
+        timeout: int = 0,
+    ) -> _DummyUploadResponse:
+        self.put_calls.append((url, headers, data, timeout))
+        return _DummyUploadResponse(self.put_status)
+
+
+class _DummyContentsContext:
+    def __init__(self, request: _DummyContentsRequest) -> None:
+        self.request = request
+
+    def cookies(self) -> list[dict]:
+        return []
+
+
+def test_compute_rtunnel_hash(tmp_path: Path) -> None:
+    import hashlib
+
+    binary = tmp_path / "rtunnel"
+    binary.write_bytes(b"test-binary")
+
+    assert _compute_rtunnel_hash(binary) == hashlib.sha256(b"test-binary").hexdigest()
+
+
+def test_rtunnel_matches_on_notebook_success() -> None:
+    import base64 as _b64
+
+    hex_hash = "abc123"
+    request = _DummyContentsRequest(
+        get_responses=[
+            _DummyContentsGetResponse(200, {"path": _CONTENTS_API_RTUNNEL_FILENAME}),
+            _DummyContentsGetResponse(
+                200,
+                {"content": _b64.b64encode(hex_hash.encode("ascii")).decode("ascii")},
+            ),
+        ]
+    )
+    ctx = _DummyContentsContext(request)
+
+    assert _rtunnel_matches_on_notebook(ctx, "https://nb.example.com/lab", hex_hash) is True
+    assert request.get_calls[0][0].endswith(
+        f"/api/contents/{_CONTENTS_API_RTUNNEL_FILENAME}?content=0"
+    )
+    assert request.get_calls[1][0].endswith(
+        f"/api/contents/{_CONTENTS_API_RTUNNEL_FILENAME}.sha256?format=base64&content=1"
+    )
+
+
+def test_rtunnel_matches_on_notebook_missing_sidecar() -> None:
+    request = _DummyContentsRequest(
+        get_responses=[
+            _DummyContentsGetResponse(200, {"path": _CONTENTS_API_RTUNNEL_FILENAME}),
+            _DummyContentsGetResponse(404),
+        ]
+    )
+    ctx = _DummyContentsContext(request)
+
+    assert _rtunnel_matches_on_notebook(ctx, "https://nb.example.com/lab", "abc123") is False
+
+
+def test_upload_rtunnel_hash_sidecar_success() -> None:
+    request = _DummyContentsRequest(put_status=201)
+    ctx = _DummyContentsContext(request)
+
+    assert _upload_rtunnel_hash_sidecar(ctx, "https://nb.example.com/lab", "deadbeef") is True
+    assert request.put_calls
+    assert request.put_calls[0][0].endswith(
+        f"/api/contents/{_CONTENTS_API_RTUNNEL_FILENAME}.sha256"
+    )
+
+
+def test_resolve_rtunnel_binary_policy_never(monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx = _DummyContentsContext(_DummyContentsRequest())
+    runtime = rtunnel_module.SshRuntimeConfig(
+        rtunnel_bin="/shared/rtunnel",
+        rtunnel_upload_policy="never",
+    )
+
+    monkeypatch.setattr(rtunnel_module.Path, "home", lambda: Path("/tmp/nonexistent-home"))
+
+    assert (
+        _resolve_rtunnel_binary(
+            context=ctx,
+            lab_url="https://nb.example.com/lab",
+            ssh_runtime=runtime,
+        )
+        is None
+    )
+
+
+def test_resolve_rtunnel_binary_reuses_matching_notebook_copy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binary = tmp_path / ".local" / "bin" / "rtunnel"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"local-binary")
+    ctx = _DummyContentsContext(_DummyContentsRequest())
+    runtime = rtunnel_module.SshRuntimeConfig(
+        rtunnel_bin="/shared/rtunnel",
+        rtunnel_upload_policy="auto",
+    )
+
+    monkeypatch.setattr(rtunnel_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(rtunnel_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(rtunnel_module, "_rtunnel_matches_on_notebook", lambda *_a, **_k: True)
+    monkeypatch.setattr(rtunnel_module, "_upload_rtunnel_via_contents_api", lambda *_a, **_k: False)
+
+    assert (
+        _resolve_rtunnel_binary(
+            context=ctx,
+            lab_url="https://nb.example.com/lab",
+            ssh_runtime=runtime,
+        )
+        == _CONTENTS_API_RTUNNEL_FILENAME
+    )
+
+
+def test_resolve_rtunnel_binary_always_uploads_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binary = tmp_path / ".local" / "bin" / "rtunnel"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"local-binary")
+    events: list[str] = []
+    ctx = _DummyContentsContext(_DummyContentsRequest())
+    runtime = rtunnel_module.SshRuntimeConfig(
+        rtunnel_bin="/shared/rtunnel",
+        rtunnel_upload_policy="always",
+    )
+
+    monkeypatch.setattr(rtunnel_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(rtunnel_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(rtunnel_module, "_rtunnel_matches_on_notebook", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        rtunnel_module,
+        "_upload_rtunnel_via_contents_api",
+        lambda *_a, **_k: events.append("upload") or True,
+    )
+    monkeypatch.setattr(
+        rtunnel_module,
+        "_upload_rtunnel_hash_sidecar",
+        lambda *_a, **_k: events.append("sidecar") or True,
+    )
+
+    assert (
+        _resolve_rtunnel_binary(
+            context=ctx,
+            lab_url="https://nb.example.com/lab",
+            ssh_runtime=runtime,
+        )
+        == _CONTENTS_API_RTUNNEL_FILENAME
+    )
+    assert events == ["upload", "sidecar"]
+
+
+def test_resolve_rtunnel_binary_skips_host_incompatible_auto_upload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binary = tmp_path / ".local" / "bin" / "rtunnel"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"host-binary")
+    ctx = _DummyContentsContext(_DummyContentsRequest())
+
+    monkeypatch.setattr(rtunnel_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(rtunnel_module.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        rtunnel_module,
+        "_rtunnel_matches_on_notebook",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not hash-check")),
+    )
+    monkeypatch.setattr(
+        rtunnel_module,
+        "_upload_rtunnel_via_contents_api",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not upload")),
+    )
+
+    assert (
+        _resolve_rtunnel_binary(
+            context=ctx,
+            lab_url="https://nb.example.com/lab",
+            ssh_runtime=rtunnel_module.SshRuntimeConfig(rtunnel_upload_policy="auto"),
+        )
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------

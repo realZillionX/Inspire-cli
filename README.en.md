@@ -267,6 +267,7 @@ action_timeout = 600
 [ssh]
 # rtunnel_bin = "/inspire/shared/tools/rtunnel"
 # apt_mirror_url = "http://nexus.example.com/repository/ubuntu/"
+# rtunnel_upload_policy = "auto"  # auto | never | always
 ```
 
 ---
@@ -324,6 +325,7 @@ When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8
 | `INSPIRE_REQUESTS_HTTPS_PROXY` | HTTPS proxy for OpenAPI      |
 | `INSPIRE_PLAYWRIGHT_PROXY`     | Proxy for browser automation |
 | `INSPIRE_RTUNNEL_PROXY`        | Proxy for SSH tunneling      |
+| `INSPIRE_RTUNNEL_UPLOAD_POLICY` | Rtunnel upload fallback policy: `auto`, `never`, or `always` |
 
 ### Workspaces & Projects
 
@@ -358,7 +360,9 @@ When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8
 
 - **There is no `inspire tunnel start` command.** Create or refresh Profiles with `inspire notebook ssh <id> --save-as <name>`.
 - **`allow_ssh=false` is the platform default.** SSH requires `sshd` + `rtunnel` pre-installed in the container — connection failure typically means the image lacks the SSH toolchain.
-- On first bootstrap, `notebook ssh` opens JupyterLab, prefers uploading `rtunnel` via Jupyter Contents API, then dispatches the setup script via terminal REST API + terminal WebSocket. Only if that path fails does it fall back to Playwright terminal automation. **This can still silently fail** — reports "Sent setup script" while `/tmp/rtunnel` doesn't exist in the container. Manually install in the container's Web terminal if needed.
+- On first bootstrap, `notebook ssh` opens JupyterLab, prefers uploading `rtunnel` via Jupyter Contents API, then dispatches the setup script via terminal REST API + terminal WebSocket. Only if that path fails does it fall back to Playwright terminal automation. The terminal WebSocket path now waits for an explicit remote completion marker before starting rtunnel / SSH readiness checks, so "command accepted" is no longer treated as "bootstrap finished". If `/tmp/rtunnel`, `sshd`, or `dropbear` is still missing in the container, continue with the manual Web-terminal install flow.
+- If the notebook already has the same `rtunnel` binary, the CLI now reuses it through a `.sha256` sidecar check instead of uploading again. To force or disable the upload fallback explicitly, use `--rtunnel-upload-policy auto|never|always` or set `ssh.rtunnel_upload_policy`.
+- On non-`Linux` hosts, the default `auto` policy no longer uploads `~/.local/bin/rtunnel` blindly to the notebook. If no explicitly remote-compatible binary is configured, the CLI skips that bad fallback and lets the container download the Linux build itself.
 - For offline notebooks, once the flow is using uploaded binaries or dropbear/apt-mirror bootstrap, the CLI skips doomed `curl` download fallbacks.
 - Images saved from instances with SSH installed will retain sshd — no need to reinstall.
 - `bridge exec` and `bridge ssh` auto-reconnect dropped tunnels for notebook-backed Profiles; `bridge scp` only checks availability without rebuilding.

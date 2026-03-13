@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional
 
-from inspire.config.models import Config
+from inspire.config.models import Config, ConfigError
 from inspire.config.rtunnel_defaults import default_rtunnel_download_url
+from inspire.config.schema_models import _parse_upload_policy
 
 DEFAULT_RTUNNEL_DOWNLOAD_URL = default_rtunnel_download_url()
 
@@ -21,6 +22,7 @@ class SshRuntimeConfig:
     setup_script: Optional[str] = None
     rtunnel_download_url: str = DEFAULT_RTUNNEL_DOWNLOAD_URL
     apt_mirror_url: Optional[str] = None
+    rtunnel_upload_policy: str = "auto"
 
 
 def resolve_ssh_runtime_config(
@@ -42,6 +44,7 @@ def resolve_ssh_runtime_config(
         "setup_script": config.setup_script,
         "rtunnel_download_url": config.rtunnel_download_url or DEFAULT_RTUNNEL_DOWNLOAD_URL,
         "apt_mirror_url": config.apt_mirror_url,
+        "rtunnel_upload_policy": config.rtunnel_upload_policy,
     }
 
     if cli_overrides:
@@ -51,6 +54,10 @@ def resolve_ssh_runtime_config(
                 values[key] = override
 
     download_url = values["rtunnel_download_url"] or DEFAULT_RTUNNEL_DOWNLOAD_URL
+    try:
+        upload_policy = _parse_upload_policy(str(values["rtunnel_upload_policy"] or "auto"))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
     return SshRuntimeConfig(
         rtunnel_bin=values["rtunnel_bin"],
@@ -59,6 +66,7 @@ def resolve_ssh_runtime_config(
         setup_script=values["setup_script"],
         rtunnel_download_url=download_url,
         apt_mirror_url=values["apt_mirror_url"],
+        rtunnel_upload_policy=upload_policy,
     )
 
 

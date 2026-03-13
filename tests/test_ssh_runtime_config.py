@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from inspire.bridge.tunnel.rtunnel import _get_rtunnel_download_url
-from inspire.config import Config
+from inspire.config import Config, ConfigError
 from inspire.config.ssh_runtime import DEFAULT_RTUNNEL_DOWNLOAD_URL, resolve_ssh_runtime_config
 
 
@@ -26,6 +26,7 @@ class TestSshRuntimeConfig:
             "INSPIRE_DROPBEAR_DEB_DIR",
             "INSPIRE_SETUP_SCRIPT",
             "INSPIRE_RTUNNEL_DOWNLOAD_URL",
+            "INSPIRE_RTUNNEL_UPLOAD_POLICY",
         ]
         for var in env_vars:
             monkeypatch.delenv(var, raising=False)
@@ -188,3 +189,96 @@ rtunnel_download_url = "https://project.example/shared.tgz"
         monkeypatch.setenv("INSPIRE_RTUNNEL_DOWNLOAD_URL", "https://env.example/shared.tgz")
 
         assert _get_rtunnel_download_url() == "https://project.example/shared.tgz"
+
+    def test_rtunnel_upload_policy_defaults_to_auto(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        clean_env: None,
+    ) -> None:
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "missing" / "config.toml")
+        monkeypatch.chdir(tmp_path)
+
+        runtime = resolve_ssh_runtime_config()
+
+        assert runtime.rtunnel_upload_policy == "auto"
+
+    def test_rtunnel_upload_policy_follows_project_toml(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        clean_env: None,
+    ) -> None:
+        _write_project_config(
+            tmp_path,
+            """
+[ssh]
+rtunnel_upload_policy = "never"
+""",
+        )
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "missing" / "config.toml")
+        monkeypatch.chdir(tmp_path)
+
+        runtime = resolve_ssh_runtime_config()
+
+        assert runtime.rtunnel_upload_policy == "never"
+
+    def test_rtunnel_upload_policy_env_overrides_by_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        clean_env: None,
+    ) -> None:
+        _write_project_config(
+            tmp_path,
+            """
+[ssh]
+rtunnel_upload_policy = "never"
+""",
+        )
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "missing" / "config.toml")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("INSPIRE_RTUNNEL_UPLOAD_POLICY", "always")
+
+        runtime = resolve_ssh_runtime_config()
+
+        assert runtime.rtunnel_upload_policy == "always"
+
+    def test_rtunnel_upload_policy_cli_override_has_highest_priority(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        clean_env: None,
+    ) -> None:
+        _write_project_config(
+            tmp_path,
+            """
+[ssh]
+rtunnel_upload_policy = "never"
+""",
+        )
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "missing" / "config.toml")
+        monkeypatch.chdir(tmp_path)
+
+        runtime = resolve_ssh_runtime_config(cli_overrides={"rtunnel_upload_policy": "always"})
+
+        assert runtime.rtunnel_upload_policy == "always"
+
+    def test_rtunnel_upload_policy_invalid_raises_config_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        clean_env: None,
+    ) -> None:
+        _write_project_config(
+            tmp_path,
+            """
+[ssh]
+rtunnel_upload_policy = "bogus"
+""",
+        )
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "missing" / "config.toml")
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(ConfigError):
+            resolve_ssh_runtime_config()

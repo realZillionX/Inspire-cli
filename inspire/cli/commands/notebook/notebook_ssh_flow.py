@@ -147,6 +147,7 @@ def _run_notebook_command_with_reconnect(
     session,
     pubkey: Optional[str],
     rtunnel_bin: Optional[str],
+    rtunnel_upload_policy: Optional[str],
     command: str,
     command_timeout: Optional[int],
     debug_playwright: bool,
@@ -170,7 +171,10 @@ def _run_notebook_command_with_reconnect(
 
     def _runtime_loader() -> object:
         return resolve_ssh_runtime_config(
-            cli_overrides={"rtunnel_bin": rtunnel_bin},
+            cli_overrides={
+                "rtunnel_bin": rtunnel_bin,
+                "rtunnel_upload_policy": rtunnel_upload_policy,
+            },
         )
 
     def _attempt_rebuild() -> bool:
@@ -349,6 +353,7 @@ def _run_interactive_notebook_ssh_with_reconnect(
     session,
     pubkey: Optional[str],
     rtunnel_bin: Optional[str],
+    rtunnel_upload_policy: Optional[str],
     debug_playwright: bool,
     setup_timeout: int,
     tunnel_retries: int,
@@ -368,7 +373,10 @@ def _run_interactive_notebook_ssh_with_reconnect(
 
     def _runtime_loader() -> object:
         return resolve_ssh_runtime_config(
-            cli_overrides={"rtunnel_bin": rtunnel_bin},
+            cli_overrides={
+                "rtunnel_bin": rtunnel_bin,
+                "rtunnel_upload_policy": rtunnel_upload_policy,
+            },
         )
 
     def _runtime_validator(runtime: object) -> None:
@@ -520,6 +528,7 @@ def run_notebook_ssh(
     command: Optional[str],
     command_timeout: Optional[int] = None,
     rtunnel_bin: Optional[str],
+    rtunnel_upload_policy: Optional[str] = None,
     debug_playwright: bool,
     setup_timeout: int,
 ) -> None:
@@ -584,10 +593,9 @@ def run_notebook_ssh(
                     text=True,
                 )
                 if result.returncode == 0 and "ok" in result.stdout:
-                    if (
-                        not getattr(cached_bridge, "notebook_name", None)
-                        and not _looks_like_notebook_id(requested_identifier)
-                    ):
+                    if not getattr(
+                        cached_bridge, "notebook_name", None
+                    ) and not _looks_like_notebook_id(requested_identifier):
                         cached_bridge.notebook_name = requested_identifier.strip() or None
                         try:
                             cached_config.add_bridge(cached_bridge)
@@ -603,6 +611,7 @@ def run_notebook_ssh(
                             session=session,
                             pubkey=pubkey,
                             rtunnel_bin=rtunnel_bin,
+                            rtunnel_upload_policy=rtunnel_upload_policy,
                             debug_playwright=debug_playwright,
                             setup_timeout=setup_timeout,
                             tunnel_retries=config.tunnel_retries,
@@ -616,6 +625,7 @@ def run_notebook_ssh(
                         session=session,
                         pubkey=pubkey,
                         rtunnel_bin=rtunnel_bin,
+                        rtunnel_upload_policy=rtunnel_upload_policy,
                         command=command,
                         command_timeout=command_timeout,
                         debug_playwright=debug_playwright,
@@ -715,7 +725,10 @@ def run_notebook_ssh(
 
     try:
         ssh_runtime = resolve_ssh_runtime_config(
-            cli_overrides={"rtunnel_bin": rtunnel_bin},
+            cli_overrides={
+                "rtunnel_bin": rtunnel_bin,
+                "rtunnel_upload_policy": rtunnel_upload_policy,
+            },
         )
     except ConfigError as e:
         _handle_error(ctx, "ConfigError", str(e), EXIT_CONFIG_ERROR)
@@ -798,6 +811,7 @@ def run_notebook_ssh(
             session=session,
             pubkey=pubkey,
             rtunnel_bin=rtunnel_bin,
+            rtunnel_upload_policy=rtunnel_upload_policy,
             debug_playwright=debug_playwright,
             setup_timeout=setup_timeout,
             tunnel_retries=config.tunnel_retries,
@@ -812,6 +826,7 @@ def run_notebook_ssh(
         session=session,
         pubkey=pubkey,
         rtunnel_bin=rtunnel_bin,
+        rtunnel_upload_policy=rtunnel_upload_policy,
         command=command,
         command_timeout=command_timeout,
         debug_playwright=debug_playwright,

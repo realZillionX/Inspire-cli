@@ -8,6 +8,7 @@ from inspire.config.schema_models import (
     _parse_float,
     _parse_int,
     _parse_list,
+    _parse_upload_policy,
 )
 
 SSH_OPTIONS: list[ConfigOption] = [
@@ -64,6 +65,16 @@ SSH_OPTIONS: list[ConfigOption] = [
         description="APT mirror URL for offline dropbear installation (e.g. http://nexus.example/repository/ubuntu/)",
         default=None,
         category="SSH",
+        scope="global",
+    ),
+    ConfigOption(
+        env_var="INSPIRE_RTUNNEL_UPLOAD_POLICY",
+        toml_key="ssh.rtunnel_upload_policy",
+        field_name="rtunnel_upload_policy",
+        description="Rtunnel upload fallback policy: auto, never, or always",
+        default="auto",
+        category="SSH",
+        parser=_parse_upload_policy,
         scope="global",
     ),
 ]

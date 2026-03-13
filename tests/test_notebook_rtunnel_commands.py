@@ -189,7 +189,7 @@ def test_non_dropbear_uses_bootstrap_sentinel_and_start_only_commands() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_contents_api_filename_inserts_move_command() -> None:
+def test_contents_api_filename_inserts_copy_search_command() -> None:
     runtime = SshRuntimeConfig()
     commands = build_rtunnel_setup_commands(
         port=31337,
@@ -201,7 +201,10 @@ def test_contents_api_filename_inserts_move_command() -> None:
     joined = "\n".join(commands)
 
     assert ".inspire_rtunnel_bin" in joined
-    assert 'mv "$HOME"/' in joined
+    assert "CONTENTS_API_RTUNNEL_FILE=" in joined
+    assert '"$PWD/$CONTENTS_API_RTUNNEL_FILE"' in joined
+    assert '"$HOME/$CONTENTS_API_RTUNNEL_FILE"' in joined
+    assert 'cp "$_rtunnel_candidate" /tmp/rtunnel' in joined
     assert "chmod +x /tmp/rtunnel" in joined
     assert "[ ! -x /tmp/rtunnel ]" in joined
 
@@ -232,17 +235,17 @@ def test_contents_api_filename_does_not_override_rtunnel_bin_path() -> None:
         contents_api_filename=".inspire_rtunnel_bin",
     )
 
-    # Find first indices of the RTUNNEL_BIN_PATH copy and the contents API move
+    # Find first indices of the RTUNNEL_BIN_PATH copy and the contents API copy loop
     bin_path_idx = None
     contents_api_idx = None
     for i, line in enumerate(commands):
         if bin_path_idx is None and 'cp "$RTUNNEL_BIN_PATH" /tmp/rtunnel' in line:
             bin_path_idx = i
-        if contents_api_idx is None and ".inspire_rtunnel_bin" in line and "mv" in line:
+        if contents_api_idx is None and "CONTENTS_API_RTUNNEL_FILE=" in line:
             contents_api_idx = i
 
     assert bin_path_idx is not None, "RTUNNEL_BIN_PATH copy line not found"
-    assert contents_api_idx is not None, "Contents API move line not found"
+    assert contents_api_idx is not None, "Contents API copy block not found"
     assert (
         bin_path_idx < contents_api_idx
-    ), "RTUNNEL_BIN_PATH copy must come before contents API move"
+    ), "RTUNNEL_BIN_PATH copy must come before contents API copy block"

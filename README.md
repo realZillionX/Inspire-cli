@@ -268,6 +268,7 @@ action_timeout = 600
 [ssh]
 # rtunnel_bin = "/inspire/shared/tools/rtunnel"
 # apt_mirror_url = "http://nexus.example.com/repository/ubuntu/"
+# rtunnel_upload_policy = "auto"  # auto | never | always
 ```
 
 ---
@@ -325,6 +326,7 @@ rtunnel = "socks5://127.0.0.1:1080"
 | `INSPIRE_REQUESTS_HTTPS_PROXY` | OpenAPI/requests HTTPS 代理 |
 | `INSPIRE_PLAYWRIGHT_PROXY`     | Playwright 浏览器代理       |
 | `INSPIRE_RTUNNEL_PROXY`        | rtunnel SSH 代理            |
+| `INSPIRE_RTUNNEL_UPLOAD_POLICY` | rtunnel 上传兜底策略：`auto`／`never`／`always` |
 
 ### 工作空间与项目
 
@@ -359,7 +361,9 @@ rtunnel = "socks5://127.0.0.1:1080"
 
 - **没有 `inspire tunnel start` 命令。** 通过 `inspire notebook ssh <id> --save-as <name>` 创建或刷新 Profile。
 - **`allow_ssh=false` 是平台默认状态。** SSH 需要容器内预装 `sshd` + `rtunnel`——如果连接失败，通常意味着镜像未包含 SSH 工具链。
-- `notebook ssh` 首次引导会先打开 JupyterLab，优先通过 Jupyter Contents API 上传 `rtunnel`，再通过 terminal REST API + terminal WebSocket 下发安装脚本；如果这些路径失败，才退回 Playwright 终端自动化。**这条链路仍可能静默失败**——报 "Sent setup script" 但容器内无 `/tmp/rtunnel`。此时需在容器 Web 终端手动安装。
+- `notebook ssh` 首次引导会先打开 JupyterLab，优先通过 Jupyter Contents API 上传 `rtunnel`，再通过 terminal REST API + terminal WebSocket 下发安装脚本；如果这些路径失败，才退回 Playwright 终端自动化。terminal WebSocket 路径现在会等待远端输出显式完成标记后再开始 rtunnel／SSH 验活，避免把“命令刚发出去”误判成“安装已经完成”。如果容器 Web 终端里依然没有 `/tmp/rtunnel`、`sshd` 或 `dropbear` 进程，再按手动安装流程排查。
+- 如果 notebook 上已有同版本 `rtunnel`，CLI 现在会通过 `.sha256` sidecar 直接复用，避免重复上传。需要显式控制兜底策略时，可用 `--rtunnel-upload-policy auto|never|always` 或配置 `ssh.rtunnel_upload_policy`。
+- 在非 `Linux` 本机上，默认 `auto` 策略不会再把本机 `~/.local/bin/rtunnel` 直接上传到远端 notebook；如果没有显式提供远端兼容的二进制，CLI 会跳过这条坏兜底，让容器侧自行下载 Linux 版 `rtunnel`。
 - 对无公网 notebook，如果已走上传二进制或 dropbear/apt-mirror 路径，CLI 会跳过注定失败的 `curl` 下载兜底。
 - 从已安装 SSH 工具链的实例保存的镜像会保留 sshd，后续实例无需重复安装。
 - `bridge exec` 和 `bridge ssh` 在 notebook-backed Profile 上会自动重连断开的隧道；`bridge scp` 仅检查隧道可用性，不会自动重建。

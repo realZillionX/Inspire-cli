@@ -6,6 +6,7 @@ import os
 
 from inspire.config.env import _parse_denylist, _parse_remote_timeout
 from inspire.config.models import Config, ConfigError
+from inspire.config.schema_models import _parse_upload_policy
 
 
 def config_from_env(*, require_target_dir: bool = False) -> Config:
@@ -106,6 +107,9 @@ def config_from_env(*, require_target_dir: bool = False) -> Config:
         requests_https_proxy=os.getenv("INSPIRE_REQUESTS_HTTPS_PROXY"),
         playwright_proxy=os.getenv("INSPIRE_PLAYWRIGHT_PROXY"),
         rtunnel_proxy=os.getenv("INSPIRE_RTUNNEL_PROXY"),
+        rtunnel_upload_policy=_parse_upload_policy(
+            os.getenv("INSPIRE_RTUNNEL_UPLOAD_POLICY", "auto")
+        ),
     )
 
 
@@ -181,4 +185,7 @@ def config_from_env_for_sync() -> Config:
         requests_https_proxy=os.getenv("INSPIRE_REQUESTS_HTTPS_PROXY"),
         playwright_proxy=os.getenv("INSPIRE_PLAYWRIGHT_PROXY"),
         rtunnel_proxy=os.getenv("INSPIRE_RTUNNEL_PROXY"),
+        rtunnel_upload_policy=_parse_upload_policy(
+            os.getenv("INSPIRE_RTUNNEL_UPLOAD_POLICY", "auto")
+        ),
     )
