@@ -62,14 +62,14 @@ def test_openapi_proxy_uses_config_when_explicit_env_missing(
 ) -> None:
     cfg = InspireConfig(
         base_url="https://qz.sii.edu.cn",
-        requests_http_proxy="http://127.0.0.1:8888",
-        requests_https_proxy="http://127.0.0.1:8888",
+        requests_http_proxy="http://127.0.0.1:7897",
+        requests_https_proxy="http://127.0.0.1:7897",
     )
     api = InspireAPI(cfg)
 
     assert api.session.proxies == {
-        "http": "http://127.0.0.1:8888",
-        "https": "http://127.0.0.1:8888",
+        "http": "http://127.0.0.1:7897",
+        "https": "http://127.0.0.1:7897",
     }
 
 
@@ -94,13 +94,13 @@ def test_openapi_force_proxy_from_config_disables_trust_env(
     cfg = InspireConfig(
         base_url="https://qz.sii.edu.cn",
         force_proxy=True,
-        requests_http_proxy="http://127.0.0.1:8888",
-        requests_https_proxy="http://127.0.0.1:8888",
+        requests_http_proxy="http://127.0.0.1:7897",
+        requests_https_proxy="http://127.0.0.1:7897",
     )
     api = InspireAPI(cfg)
 
     assert api.session.trust_env is False
-    assert api.session.proxies["http"] == "http://127.0.0.1:8888"
+    assert api.session.proxies["http"] == "http://127.0.0.1:7897"
 
 
 def test_openapi_force_proxy_env_overrides_config(
@@ -108,11 +108,11 @@ def test_openapi_force_proxy_env_overrides_config(
     patch_requests_session: None,
 ) -> None:
     monkeypatch.setenv("INSPIRE_FORCE_PROXY", "true")
-    monkeypatch.setenv("http_proxy", "http://127.0.0.1:8888")
-    monkeypatch.setenv("https_proxy", "http://127.0.0.1:8888")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:7897")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:7897")
 
     cfg = InspireConfig(base_url="https://qz.sii.edu.cn", force_proxy=False)
     api = InspireAPI(cfg)
 
     assert api.session.trust_env is False
-    assert api.session.proxies["http"] == "http://127.0.0.1:8888"
+    assert api.session.proxies["http"] == "http://127.0.0.1:7897"

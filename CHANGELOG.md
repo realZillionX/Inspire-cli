@@ -4,6 +4,7 @@
 
 ### Fix
 
+- Removed the legacy local `8888/1080` split-proxy guidance and auto-rewrite path. Proxy examples and runtime defaults now target the `Clash Verge` `7897` mixed port instead.
 - `inspire notebook ssh` now keeps the terminal WebSocket bootstrap path open until the remote setup script emits its completion marker, instead of treating "stdin accepted" as "SSH tooling is ready". This reduces false negatives where `sshd` / `dropbear` / `rtunnel` were still starting when readiness probes began.
 - `inspire notebook ssh` now supports `ssh.rtunnel_upload_policy` / `INSPIRE_RTUNNEL_UPLOAD_POLICY` / `--rtunnel-upload-policy` to control Contents API upload fallback, and reuses an existing notebook-side `rtunnel` binary when the `.sha256` sidecar matches the local copy.
 - `inspire notebook ssh` no longer auto-uploads a host-local `Darwin` `rtunnel` binary as fallback on non-`Linux` machines. In `auto` mode it now skips that incompatible upload path and lets the notebook download a Linux-compatible binary instead.

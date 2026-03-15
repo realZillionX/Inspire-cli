@@ -33,10 +33,10 @@ retry_delay = 1.0
 
 [proxy]
 # Proxy is OPTIONAL. Leave commented if your network can reach *.sii.edu.cn directly.
-# requests_http = "http://127.0.0.1:8888"
-# requests_https = "http://127.0.0.1:8888"
-# playwright = "socks5://127.0.0.1:1080"
-# rtunnel = "socks5://127.0.0.1:1080"
+# requests_http = "http://127.0.0.1:7897"
+# requests_https = "http://127.0.0.1:7897"
+# playwright = "http://127.0.0.1:7897"
+# rtunnel = "http://127.0.0.1:7897"
 
 [paths]
 target_dir = "/shared/EBM_dev"

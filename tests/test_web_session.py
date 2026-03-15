@@ -99,8 +99,8 @@ def test_build_requests_session_applies_toml_proxy(monkeypatch: pytest.MonkeyPat
         "resolve_requests_proxy_config",
         lambda: (
             {
-                "http": "http://127.0.0.1:8888",
-                "https": "http://127.0.0.1:8888",
+                "http": "http://127.0.0.1:7897",
+                "https": "http://127.0.0.1:7897",
             },
             "toml",
         ),
@@ -108,8 +108,8 @@ def test_build_requests_session_applies_toml_proxy(monkeypatch: pytest.MonkeyPat
 
     http = ws_requests_module.build_requests_session(session, "https://qz.sii.edu.cn/api/v1/test")
 
-    assert http.proxies["http"] == "http://127.0.0.1:8888"
-    assert http.proxies["https"] == "http://127.0.0.1:8888"
+    assert http.proxies["http"] == "http://127.0.0.1:7897"
+    assert http.proxies["https"] == "http://127.0.0.1:7897"
     assert http.trust_env is False
     http.close()
 

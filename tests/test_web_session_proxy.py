@@ -36,19 +36,19 @@ def clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_playwright_proxy_prefers_explicit_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("INSPIRE_PLAYWRIGHT_PROXY", "socks5://127.0.0.1:1080")
-    monkeypatch.setenv("https_proxy", "http://127.0.0.1:8888")
+    monkeypatch.setenv("INSPIRE_PLAYWRIGHT_PROXY", "http://127.0.0.1:7897")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:7897")
 
-    assert get_playwright_proxy() == {"server": "socks5://127.0.0.1:1080"}
+    assert get_playwright_proxy() == {"server": "http://127.0.0.1:7897"}
 
 
-def test_get_playwright_proxy_auto_splits_qizhi_8888_to_1080(
+def test_get_playwright_proxy_reuses_qizhi_mixed_proxy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("INSPIRE_BASE_URL", "https://qz.sii.edu.cn")
-    monkeypatch.setenv("http_proxy", "http://127.0.0.1:8888")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:7897")
 
-    assert get_playwright_proxy() == {"server": "socks5://127.0.0.1:1080"}
+    assert get_playwright_proxy() == {"server": "http://127.0.0.1:7897"}
 
 
 def test_get_playwright_proxy_falls_back_to_http_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,7 +63,7 @@ def test_get_playwright_proxy_uses_proxy_toml(monkeypatch: pytest.MonkeyPatch) -
         username="",
         password="",
         base_url="https://qz.sii.edu.cn",
-        playwright_proxy="socks5://127.0.0.1:1080",
+        playwright_proxy="http://127.0.0.1:7897",
     )
     monkeypatch.setattr(
         config_module.Config,
@@ -71,7 +71,7 @@ def test_get_playwright_proxy_uses_proxy_toml(monkeypatch: pytest.MonkeyPatch) -
         classmethod(lambda cls, **kwargs: (cfg, {})),
     )
 
-    assert get_playwright_proxy() == {"server": "socks5://127.0.0.1:1080"}
+    assert get_playwright_proxy() == {"server": "http://127.0.0.1:7897"}
 
 
 def test_resolve_requests_proxy_config_prefers_toml(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,8 +79,8 @@ def test_resolve_requests_proxy_config_prefers_toml(monkeypatch: pytest.MonkeyPa
         username="",
         password="",
         base_url="https://qz.sii.edu.cn",
-        requests_http_proxy="http://127.0.0.1:8888",
-        requests_https_proxy="http://127.0.0.1:8888",
+        requests_http_proxy="http://127.0.0.1:7897",
+        requests_https_proxy="http://127.0.0.1:7897",
     )
     monkeypatch.setattr(
         config_module.Config,
@@ -91,8 +91,8 @@ def test_resolve_requests_proxy_config_prefers_toml(monkeypatch: pytest.MonkeyPa
     proxies, source = resolve_requests_proxy_config()
     assert source == "toml"
     assert proxies == {
-        "http": "http://127.0.0.1:8888",
-        "https": "http://127.0.0.1:8888",
+        "http": "http://127.0.0.1:7897",
+        "https": "http://127.0.0.1:7897",
     }
 
 
@@ -101,7 +101,7 @@ def test_get_rtunnel_proxy_override_uses_toml(monkeypatch: pytest.MonkeyPatch) -
         username="",
         password="",
         base_url="https://qz.sii.edu.cn",
-        rtunnel_proxy="socks5://127.0.0.1:1080",
+        rtunnel_proxy="http://127.0.0.1:7897",
     )
     monkeypatch.setattr(
         config_module.Config,
@@ -109,4 +109,4 @@ def test_get_rtunnel_proxy_override_uses_toml(monkeypatch: pytest.MonkeyPatch) -
         classmethod(lambda cls, **kwargs: (cfg, {})),
     )
 
-    assert get_rtunnel_proxy_override() == "socks5://127.0.0.1:1080"
+    assert get_rtunnel_proxy_override() == "http://127.0.0.1:7897"

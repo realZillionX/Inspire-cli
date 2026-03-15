@@ -245,10 +245,10 @@ force_proxy = true
 
 [proxy]
 # 代理配置是可选的。如果本地网络可直连 *.sii.edu.cn，无需配置。
-# requests_http = "http://127.0.0.1:8888"
-# requests_https = "http://127.0.0.1:8888"
-# playwright = "socks5://127.0.0.1:1080"
-# rtunnel = "socks5://127.0.0.1:1080"
+# requests_http = "http://127.0.0.1:7897"
+# requests_https = "http://127.0.0.1:7897"
+# playwright = "http://127.0.0.1:7897"
+# rtunnel = "http://127.0.0.1:7897"
 
 [workspaces]
 # 项目级 workspace 映射，使用平台里的实际名称。
@@ -281,17 +281,17 @@ action_timeout = 600
 
 ### 需要代理时
 
-适用于通过 aTrust VPN（Docker 容器化）访问启智平台的场景：
+统一走本机 `Clash Verge` / `verge-mihomo` 的 `7897` mixed port。域名规则会把 `*.sii.edu.cn` 转给 `Sii-Proxy`，公网流量也复用同一个本地入口：
 
 ```toml
 [proxy]
-requests_http = "http://127.0.0.1:8888"    # aTrust HTTP 代理
-requests_https = "http://127.0.0.1:8888"
-playwright = "socks5://127.0.0.1:1080"     # aTrust SOCKS5 代理
-rtunnel = "socks5://127.0.0.1:1080"
+requests_http = "http://127.0.0.1:7897"    # Clash Verge mixed port
+requests_https = "http://127.0.0.1:7897"
+playwright = "http://127.0.0.1:7897"
+rtunnel = "http://127.0.0.1:7897"
 ```
 
-端口号取决于你的 [Docker-aTrust](https://github.com/realZillionX/Docker-aTrust) 容器配置（默认 `8888` / `1080`）。
+如某个工具只支持 `SOCKS5`，可改用 `socks5://127.0.0.1:7897`；本地入口仍然是同一个 `7897` mixed port。
 
 ### 代理优先级
 
@@ -301,7 +301,7 @@ rtunnel = "socks5://127.0.0.1:1080"
 
 ### 自动分流
 
-当 `base_url` 属于 `.sii.edu.cn` 且 requests 代理为 `http://127.0.0.1:8888` 时，Playwright 和 rtunnel 会自动降级到 `socks5://127.0.0.1:1080`。
+`Clash Verge` 会在 `7897` 上按域名规则分流；CLI 不再对本地 `1080/8888` 端口做兼容或自动改写。
 
 ---
 

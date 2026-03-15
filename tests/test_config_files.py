@@ -403,23 +403,23 @@ timeout = 45
 username = "globaluser"
 
 [proxy]
-requests_http = "http://127.0.0.1:8888"
-requests_https = "http://127.0.0.1:8888"
-playwright = "socks5://127.0.0.1:1080"
-rtunnel = "socks5://127.0.0.1:1080"
+requests_http = "http://127.0.0.1:7897"
+requests_https = "http://127.0.0.1:7897"
+playwright = "http://127.0.0.1:7897"
+rtunnel = "http://127.0.0.1:7897"
 """
         )
 
         monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", global_config)
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("INSPIRE_REQUESTS_HTTP_PROXY", "http://127.0.0.1:7897")
+        monkeypatch.setenv("INSPIRE_REQUESTS_HTTP_PROXY", "http://127.0.0.1:17997")
 
         cfg, sources = Config.from_files_and_env(require_credentials=False)
 
-        assert cfg.requests_http_proxy == "http://127.0.0.1:7897"
-        assert cfg.requests_https_proxy == "http://127.0.0.1:8888"
-        assert cfg.playwright_proxy == "socks5://127.0.0.1:1080"
-        assert cfg.rtunnel_proxy == "socks5://127.0.0.1:1080"
+        assert cfg.requests_http_proxy == "http://127.0.0.1:17997"
+        assert cfg.requests_https_proxy == "http://127.0.0.1:7897"
+        assert cfg.playwright_proxy == "http://127.0.0.1:7897"
+        assert cfg.rtunnel_proxy == "http://127.0.0.1:7897"
         assert sources["requests_http_proxy"] == SOURCE_ENV
         assert sources["requests_https_proxy"] == SOURCE_GLOBAL
         assert sources["playwright_proxy"] == SOURCE_GLOBAL

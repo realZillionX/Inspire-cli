@@ -4,18 +4,8 @@ from __future__ import annotations
 
 import os
 from typing import Optional
-from urllib.parse import urlsplit
 
 from inspire.config import Config
-
-
-def _looks_like_qizhi_host(base_url: str) -> bool:
-    try:
-        host = urlsplit(base_url).hostname or ""
-    except Exception:
-        host = ""
-    host = host.lower()
-    return host == "qz.sii.edu.cn" or host.endswith(".sii.edu.cn")
 
 
 def _normalize_proxy(value: object) -> str:
@@ -102,20 +92,13 @@ def get_playwright_proxy() -> Optional[dict]:
     if explicit_proxy:
         return {"server": explicit_proxy}
 
-    base_url, toml_values = _load_proxy_toml_values()
+    _, toml_values = _load_proxy_toml_values()
     toml_playwright = _normalize_proxy(toml_values.get("playwright"))
     if toml_playwright:
         return {"server": toml_playwright}
 
     requests_proxies, _ = _resolve_requests_proxy_config_with_toml(toml_values)
     chosen_requests_proxy = _preferred_proxy_server(requests_proxies)
-
-    # Inspire/QiZhi deployments commonly require split proxy routing:
-    # requests/curl -> 8888 (HTTP), Playwright -> 1080 (SOCKS5).
-    # Keep this auto-fallback narrow to .sii.edu.cn base URLs.
-    if _looks_like_qizhi_host(base_url):
-        if chosen_requests_proxy.startswith("http://127.0.0.1:8888"):
-            return {"server": "socks5://127.0.0.1:1080"}
 
     if chosen_requests_proxy:
         return {"server": chosen_requests_proxy}
@@ -133,16 +116,11 @@ def get_rtunnel_proxy_override() -> str | None:
     if explicit:
         return explicit
 
-    base_url, toml_values = _load_proxy_toml_values()
+    _, toml_values = _load_proxy_toml_values()
     toml_rtunnel = _normalize_proxy(toml_values.get("rtunnel"))
     if toml_rtunnel:
         return toml_rtunnel
 
     requests_proxies, _ = _resolve_requests_proxy_config_with_toml(toml_values)
     chosen_requests_proxy = _preferred_proxy_server(requests_proxies)
-
-    if _looks_like_qizhi_host(base_url) and chosen_requests_proxy.startswith(
-        "http://127.0.0.1:8888"
-    ):
-        return "socks5://127.0.0.1:1080"
     return chosen_requests_proxy or None

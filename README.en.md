@@ -244,10 +244,10 @@ force_proxy = true
 
 [proxy]
 # Proxy config is optional. Skip this section if your network can reach *.sii.edu.cn directly.
-# requests_http = "http://127.0.0.1:8888"
-# requests_https = "http://127.0.0.1:8888"
-# playwright = "socks5://127.0.0.1:1080"
-# rtunnel = "socks5://127.0.0.1:1080"
+# requests_http = "http://127.0.0.1:7897"
+# requests_https = "http://127.0.0.1:7897"
+# playwright = "http://127.0.0.1:7897"
+# rtunnel = "http://127.0.0.1:7897"
 
 [workspaces]
 # Project-local workspace mappings using the platform's actual names.
@@ -280,17 +280,17 @@ If your network can reach `*.sii.edu.cn` directly (e.g., campus network), **no p
 
 ### When Proxy is Needed
 
-For accessing the Inspire platform via aTrust VPN (Docker-containerized):
+Use the local `Clash Verge` / `verge-mihomo` `7897` mixed port. Domain rules send `*.sii.edu.cn` to `Sii-Proxy`, while public traffic reuses the same local entrypoint:
 
 ```toml
 [proxy]
-requests_http = "http://127.0.0.1:8888"    # aTrust HTTP proxy
-requests_https = "http://127.0.0.1:8888"
-playwright = "socks5://127.0.0.1:1080"     # aTrust SOCKS5 proxy
-rtunnel = "socks5://127.0.0.1:1080"
+requests_http = "http://127.0.0.1:7897"    # Clash Verge mixed port
+requests_https = "http://127.0.0.1:7897"
+playwright = "http://127.0.0.1:7897"
+rtunnel = "http://127.0.0.1:7897"
 ```
 
-Ports depend on your [Docker-aTrust](https://github.com/realZillionX/Docker-aTrust) container config (defaults: `8888` / `1080`).
+If a tool only supports `SOCKS5`, switch to `socks5://127.0.0.1:7897`; the local entrypoint is still the same `7897` mixed port.
 
 ### Proxy Precedence
 
@@ -300,7 +300,7 @@ Ports depend on your [Docker-aTrust](https://github.com/realZillionX/Docker-aTru
 
 ### Auto Split-routing
 
-When `base_url` is under `.sii.edu.cn` and requests proxy is `http://127.0.0.1:8888`, Playwright and rtunnel automatically fall back to `socks5://127.0.0.1:1080`.
+`Clash Verge` now handles domain-based routing on `7897`; the CLI no longer carries legacy compatibility or auto-rewrites for local `1080/8888` ports.
 
 ---
 

@@ -896,12 +896,12 @@ class TestProxyCommand:
             proxy_url="https://proxy.example.com/tunnel",
         )
         rtunnel_bin = tmp_path / "rtunnel"
-        monkeypatch.setenv("INSPIRE_RTUNNEL_PROXY", "socks5://127.0.0.1:1080")
+        monkeypatch.setenv("INSPIRE_RTUNNEL_PROXY", "http://127.0.0.1:7897")
 
         cmd = _get_proxy_command(bridge, rtunnel_bin, quiet=False)
 
-        assert "HTTP_PROXY=socks5://127.0.0.1:1080" in cmd
-        assert "HTTPS_PROXY=socks5://127.0.0.1:1080" in cmd
+        assert "HTTP_PROXY=http://127.0.0.1:7897" in cmd
+        assert "HTTPS_PROXY=http://127.0.0.1:7897" in cmd
         assert "wss://proxy.example.com/tunnel" in cmd
 
     def test_get_proxy_command_uses_rtunnel_proxy_from_toml(
@@ -918,7 +918,7 @@ class TestProxyCommand:
             username="",
             password="",
             base_url="https://qz.sii.edu.cn",
-            rtunnel_proxy="socks5://127.0.0.1:1080",
+            rtunnel_proxy="http://127.0.0.1:7897",
         )
         monkeypatch.setattr(
             Config,
@@ -928,10 +928,10 @@ class TestProxyCommand:
 
         cmd = _get_proxy_command(bridge, rtunnel_bin, quiet=False)
 
-        assert "HTTP_PROXY=socks5://127.0.0.1:1080" in cmd
-        assert "HTTPS_PROXY=socks5://127.0.0.1:1080" in cmd
+        assert "HTTP_PROXY=http://127.0.0.1:7897" in cmd
+        assert "HTTPS_PROXY=http://127.0.0.1:7897" in cmd
 
-    def test_get_proxy_command_auto_splits_qizhi_proxy(
+    def test_get_proxy_command_reuses_qizhi_mixed_proxy(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -941,9 +941,14 @@ class TestProxyCommand:
             proxy_url="https://proxy.example.com/tunnel",
         )
         rtunnel_bin = tmp_path / "rtunnel"
+        monkeypatch.setattr(
+            Config,
+            "from_files_and_env",
+            classmethod(lambda cls, **kwargs: (_ for _ in ()).throw(RuntimeError("no config"))),
+        )
         monkeypatch.setenv("INSPIRE_BASE_URL", "https://qz.sii.edu.cn")
-        monkeypatch.setenv("http_proxy", "http://127.0.0.1:8888")
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:7897")
 
         cmd = _get_proxy_command(bridge, rtunnel_bin, quiet=False)
 
-        assert "HTTP_PROXY=socks5://127.0.0.1:1080" in cmd
+        assert "HTTP_PROXY=http://127.0.0.1:7897" in cmd
