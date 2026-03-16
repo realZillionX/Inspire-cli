@@ -612,6 +612,30 @@ def test_job_list_uses_local_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert TEST_JOB_ID in result.output
 
 
+def test_job_list_defaults_to_all_cached_jobs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_config_and_auth(monkeypatch, tmp_path)
+
+    config = make_test_config(tmp_path)
+    cache = JobCache(config.get_expanded_cache_path())
+    for index in range(12):
+        cache.add_job(
+            job_id=f"job-aaaaaaa{index:01d}-1234-1234-1234-{index:012d}"[:40],
+            name=f"job-{index}",
+            resource="H200",
+            command=f"echo {index}",
+            status="PENDING",
+        )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["job", "list"])
+
+    assert result.exit_code == 0
+    assert "Total: 12 job(s)" in result.output
+    assert "job-11" in result.output
+
+
 def test_job_list_refreshes_live_status_from_web_api(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -662,6 +686,89 @@ def test_job_list_refreshes_live_status_from_web_api(
 
     runner = CliRunner()
     result = runner.invoke(cli_main, ["job", "list", "--limit", "5"])
+
+    assert result.exit_code == 0
+    assert "job_succeeded" in result.output
+    refreshed = cache.get_job(TEST_JOB_ID)
+    assert refreshed is not None
+    assert refreshed["status"] == "job_succeeded"
+
+
+def test_job_list_live_refresh_scans_beyond_ten_pages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_config_and_auth(monkeypatch, tmp_path)
+
+    config = make_test_config(tmp_path)
+    cache = JobCache(config.get_expanded_cache_path())
+    cache.add_job(
+        job_id=TEST_JOB_ID,
+        name="cached-job",
+        resource="H200",
+        command="echo test",
+        status="PENDING",
+    )
+
+    from importlib import import_module
+
+    jobs_module = import_module("inspire.platform.web.browser_api.jobs")
+    JobInfo = jobs_module.JobInfo
+
+    def fake_list_jobs(workspace_id=None, page_num=1, page_size=100, session=None):  # noqa: ARG001
+        if page_num < 11:
+            return (
+                [
+                    JobInfo(
+                        job_id=f"job-{page_num:08d}-0000-0000-0000-000000000000",
+                        name=f"other-{page_num}",
+                        status="PENDING",
+                        command="echo other",
+                        created_at="2025-01-01T00:00:00",
+                        finished_at=None,
+                        created_by_name="tester",
+                        created_by_id="user-1",
+                        project_id="project-1",
+                        project_name="Test Project",
+                        compute_group_name="H200 TestRoom",
+                        gpu_type="H200",
+                        gpu_count=8,
+                        instance_count=1,
+                        priority=9,
+                        workspace_id="ws-test-workspace",
+                    )
+                ],
+                11 * page_size,
+            )
+        if page_num == 11:
+            return (
+                [
+                    JobInfo(
+                        job_id=TEST_JOB_ID,
+                        name="cached-job",
+                        status="job_succeeded",
+                        command="echo test",
+                        created_at="2025-01-01T00:00:00",
+                        finished_at=None,
+                        created_by_name="tester",
+                        created_by_id="user-1",
+                        project_id="project-1",
+                        project_name="Test Project",
+                        compute_group_name="H200 TestRoom",
+                        gpu_type="H200",
+                        gpu_count=8,
+                        instance_count=1,
+                        priority=9,
+                        workspace_id="ws-test-workspace",
+                    )
+                ],
+                11 * page_size,
+            )
+        return ([], 11 * page_size)
+
+    monkeypatch.setattr(jobs_module, "list_jobs", fake_list_jobs)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["job", "list"])
 
     assert result.exit_code == 0
     assert "job_succeeded" in result.output
@@ -818,6 +925,33 @@ def test_job_update_refreshes_job_creating_status(monkeypatch: pytest.MonkeyPatc
     refreshed = cache.get_job(TEST_JOB_ID)
     assert refreshed is not None
     assert refreshed["status"] == "SUCCEEDED"
+
+
+def test_job_update_defaults_to_refresh_all_cached_active_jobs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    api = patch_config_and_auth(monkeypatch, tmp_path)
+
+    config = make_test_config(tmp_path)
+    cache = JobCache(config.get_expanded_cache_path())
+    for index in range(12):
+        cache.add_job(
+            job_id=f"job-bbbbbbb{index:01d}-1234-1234-1234-{index:012d}"[:40],
+            name=f"job-{index}",
+            resource="H200",
+            command=f"echo {index}",
+            status="PENDING",
+        )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["--json", "job", "update", "--delay", "0"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["success"] is True
+    assert len(payload["data"]["updated"]) == 12
+    assert len(api.calls["get_job_detail"]) == 12
+
 
 
 def test_job_logs_path_and_tail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

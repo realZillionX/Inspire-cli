@@ -111,7 +111,7 @@ def _refresh_live_jobs_from_web_api(cache, jobs: list[dict]) -> list[dict]:  # n
                 if total is not None and page_num * page_size >= int(total):
                     break
                 page_num += 1
-                if page_num > 10:
+                if total is None and page_num > 50:
                     break
             if not (target_ids - refreshed.keys()):
                 break
@@ -272,7 +272,13 @@ def _watch_jobs(
 
 
 @click.command("list")
-@click.option("--limit", "-n", type=int, default=10, help="Max jobs to show (default: 10)")
+@click.option(
+    "--limit",
+    "-n",
+    type=int,
+    default=0,
+    help="Max jobs to show (0 = all, default: all)",
+)
 @click.option("--status", "-s", help="Filter by status (PENDING, RUNNING, SUCCEEDED, FAILED)")
 @click.option(
     "--active",
@@ -549,8 +555,8 @@ def wait(ctx: Context, job_id: str, timeout: int, interval: int) -> None:
     "--limit",
     "-n",
     type=int,
-    default=10,
-    help="Max jobs to refresh from cache (default: 10)",
+    default=0,
+    help="Max jobs to refresh from cache (0 = all, default: all)",
 )
 @click.option(
     "--delay",

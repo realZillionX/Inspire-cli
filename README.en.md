@@ -89,12 +89,12 @@ inspire notebook ssh <id>                       # SSH into instance (auto-establ
 | -------------------------- | -------------------------------------------------------- |
 | `inspire job create`       | Submit distributed training job (fine-grained control)   |
 | `inspire run "<cmd>"`      | Quick submit (auto resource selection, `--sync --watch`) |
-| `inspire job list`         | List locally cached jobs                                 |
+| `inspire job list`         | List locally cached jobs (shows all by default; use `--limit` to cap) |
 | `inspire job status <id>`  | Query job status                                         |
 | `inspire job logs <id>`    | View job logs (`--tail`, `--follow`, `--head`)           |
 | `inspire job wait <id>`    | Block until job finishes                                 |
 | `inspire job stop <id>`    | Stop a job                                               |
-| `inspire job update`       | Refresh cached active job statuses                       |
+| `inspire job update`       | Refresh cached active job statuses (refreshes all active cached jobs by default) |
 | `inspire job command <id>` | View the submitted command                               |
 
 ### HPC Jobs
