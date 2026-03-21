@@ -8,6 +8,8 @@
 - `inspire notebook ssh` now keeps the terminal WebSocket bootstrap path open until the remote setup script emits its completion marker, instead of treating "stdin accepted" as "SSH tooling is ready". This reduces false negatives where `sshd` / `dropbear` / `rtunnel` were still starting when readiness probes began.
 - `inspire notebook ssh` now supports `ssh.rtunnel_upload_policy` / `INSPIRE_RTUNNEL_UPLOAD_POLICY` / `--rtunnel-upload-policy` to control Contents API upload fallback, and reuses an existing notebook-side `rtunnel` binary when the `.sha256` sidecar matches the local copy.
 - `inspire notebook ssh` no longer auto-uploads a host-local `Darwin` `rtunnel` binary as fallback on non-`Linux` machines. In `auto` mode it now skips that incompatible upload path and lets the notebook download a Linux-compatible binary instead.
+- `inspire bridge exec` and `inspire bridge ssh` now fast-fail when a notebook-backed bridge points to a notebook that is not yet `RUNNING`, instead of wasting tunnel rebuild attempts against `PENDING` or `STOPPED` instances.
+- `inspire sync --source bundle` now prefers offline bridge profiles before internet-capable ones when both are configured, while preserving the fork's existing `--source auto` and push-default semantics for compatibility.
 
 ## v0.2.11 (2026-03-12)
 

@@ -2,6 +2,8 @@
 
 > Quick reference for AI assistants working with the Inspire CLI codebase.
 
+As of: 2026-03-21
+
 Project-level `AGENTS.md` now lives outside this repository at `../AGENTS.md`.
 
 ## Project Overview
@@ -17,16 +19,9 @@ Inspire CLI is a command-line tool for the Inspire HPC platform:
 
 Treat `.gitignore` as the source of truth for ignored/private boundaries.
 
-Ignored/internal paths currently include:
-- `.inspire/`
-- `internal/`
-- `scripts/`
-- `API_ENDPOINTS.md`
-- `CLAUDE.md`
-- `config.toml.example`
-- `docs/rtunnel-ssh-setup.md`
+Do not enumerate private/internal file paths in this document. Keep private-scope details in `.gitignore` only.
 
-Avoid adding docs/tests/examples that depend on ignored files.
+When preparing public-sync changes, verify touched files against `.gitignore` and avoid adding docs/tests/examples that depend on private-only files.
 
 ## Architecture (Current)
 
@@ -85,9 +80,20 @@ inspire init
 
 - `inspire bridge ssh` and `inspire bridge scp` should validate explicit `--bridge` names first and return `BridgeNotFound` guidance when missing (`inspire tunnel list`).
 - For tunnel failures (profile exists but SSH unavailable), the recovery flow is `inspire tunnel status`, then re-create via `inspire notebook ssh <notebook-id> --save-as <name>` when needed.
+- For notebook-backed bridge profiles, `bridge exec` and `bridge ssh` should fail fast when notebook detail explicitly reports a non-`RUNNING` status, instead of burning rebuild retries against `PENDING` / `STOPPED` instances.
 - There is no `inspire tunnel start` command in this CLI.
 - `BridgeProfile` supports optional `notebook_id`; notebook SSH fast-path reuse is only valid when cached `notebook_id` matches the requested notebook.
 - `generate_ssh_config()` must reuse `_get_proxy_command()` so `ProxyCommand` remains shell-quoted and safe for URLs/paths with special characters.
+
+## Sync Semantics (As of 2026-03-21)
+
+- `inspire sync` defaults to `--transport ssh --source auto`.
+- With `--source auto`, internet-capable bridges prefer remote git sync; no-internet bridges fall back to bundle sync.
+- Explicit `--source bundle` now prefers offline bridges before internet-capable bridges.
+- `--source remote` requires an internet-capable bridge.
+- Push defaults are compatibility-preserving: `required` for remote/workflow sync, `best-effort` for bundle sync, unless `--push-mode` or `--no-push` overrides them.
+- `--branch` is removed.
+- `--transport workflow` remains an explicit fallback mode; there is no automatic SSH-to-workflow fallback.
 
 ## Configuration Model
 

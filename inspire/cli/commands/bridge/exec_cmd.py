@@ -55,7 +55,7 @@ from inspire.config.ssh_runtime import resolve_ssh_runtime_config
 from inspire.platform.web import browser_api as browser_api_module
 
 logger = logging.getLogger(__name__)
-_TERMINAL_NOTEBOOK_STATUSES = frozenset({"FAILED", "ERROR", "STOPPED", "DELETED"})
+_RUNNING_NOTEBOOK_STATUS = "RUNNING"
 
 
 def split_denylist(items: tuple[str, ...]) -> list[str]:
@@ -165,7 +165,12 @@ def try_exec_via_ssh_tunnel(
                     session=reconnect_state.web_session,
                 )
                 notebook_status = str((notebook_detail or {}).get("status") or "").strip().upper()
-                if notebook_status in _TERMINAL_NOTEBOOK_STATUSES:
+                if notebook_status and notebook_status != _RUNNING_NOTEBOOK_STATUS:
+                    hint = (
+                        f"Start it with 'inspire notebook start {notebook_id}' if needed, "
+                        f"or wait until 'inspire notebook status {notebook_id}' reports RUNNING, "
+                        "then retry."
+                    )
                     return _emit_error(
                         ctx,
                         "TunnelError",
@@ -174,7 +179,7 @@ def try_exec_via_ssh_tunnel(
                             f"Bridge '{bridge.name}' notebook '{notebook_id}' "
                             f"is {notebook_status}."
                         ),
-                        hint=f"Start it with 'inspire notebook start {notebook_id}' and retry.",
+                        hint=hint,
                     )
             except Exception as status_error:  # noqa: BLE001
                 logger.debug(

@@ -123,7 +123,7 @@ inspire notebook ssh <id>                       # SSH into instance (auto-establ
 
 | Command                          | Description                                                          |
 | -------------------------------- | -------------------------------------------------------------------- |
-| `inspire sync`                   | Sync code to shared filesystem (SSH default, `--transport workflow`) |
+| `inspire sync`                   | Sync code to shared filesystem (SSH default; explicit `--source bundle` prefers offline bridges; `--transport workflow`) |
 | `inspire bridge exec "<cmd>"`    | Execute command on remote `INSPIRE_TARGET_DIR`                       |
 | `inspire bridge ssh`             | Open interactive SSH shell                                           |
 | `inspire bridge scp <src> <dst>` | Upload/download files (`-r` recursive, `-d` download direction)      |
@@ -365,7 +365,7 @@ If a tool only supports `SOCKS5`, switch to `socks5://127.0.0.1:7897`; the local
 - On non-`Linux` hosts, the default `auto` policy no longer uploads `~/.local/bin/rtunnel` blindly to the notebook. If no explicitly remote-compatible binary is configured, the CLI skips that bad fallback and lets the container download the Linux build itself.
 - For offline notebooks, once the flow is using uploaded binaries or dropbear/apt-mirror bootstrap, the CLI skips doomed `curl` download fallbacks.
 - Images saved from instances with SSH installed will retain sshd — no need to reinstall.
-- `bridge exec` and `bridge ssh` auto-reconnect dropped tunnels for notebook-backed Profiles; `bridge scp` only checks availability without rebuilding.
+- `bridge exec` and `bridge ssh` auto-reconnect dropped tunnels for notebook-backed Profiles; when the linked notebook is explicitly not `RUNNING`, the CLI now fails fast with a start/wait hint instead of spinning through rebuild attempts. `bridge scp` only checks availability without rebuilding.
 - rtunnel install script uses dynamic platform detection (`uname -s/-m`), independent of local host architecture.
 - `inspire --debug` writes a redacted debug report under `~/.cache/inspire-cli/logs/`, which is useful for tracing upload, terminal, and proxy failures.
 

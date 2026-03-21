@@ -155,26 +155,47 @@ def _is_cpu_bridge_name(name: str) -> bool:
     return "cpu" in normalized.split()
 
 
-def _ordered_bridges_for_sync(tunnel_config: TunnelConfig) -> list[BridgeProfile]:
+def _ordered_bridges_for_sync(
+    tunnel_config: TunnelConfig,
+    *,
+    source: str = "auto",
+) -> list[BridgeProfile]:
     """Return all configured bridges ordered for sync preference.
 
     Priority:
-    1) internet + CPU
-    2) internet + non-CPU
-    3) no-internet + CPU
-    4) no-internet + non-CPU
+    - source=auto|remote:
+      1) internet + CPU
+      2) internet + non-CPU
+      3) no-internet + CPU
+      4) no-internet + non-CPU
+
+    - source=bundle:
+      1) no-internet + CPU
+      2) no-internet + non-CPU
+      3) internet + CPU
+      4) internet + non-CPU
     """
     bridges = tunnel_config.list_bridges()
     if not bridges:
         return []
 
     default_bridge = tunnel_config.default_bridge
+    prefer_internet = source.lower().strip() != "bundle"
 
     def _priority(bridge: BridgeProfile) -> int:
         is_cpu = _is_cpu_bridge_name(bridge.name)
-        if bridge.has_internet and is_cpu:
+        if prefer_internet:
+            if bridge.has_internet and is_cpu:
+                return 0
+            if bridge.has_internet:
+                return 1
+            if is_cpu:
+                return 2
+            return 3
+
+        if (not bridge.has_internet) and is_cpu:
             return 0
-        if bridge.has_internet:
+        if not bridge.has_internet:
             return 1
         if is_cpu:
             return 2
@@ -650,7 +671,7 @@ def sync(
     candidate_bridges: list[BridgeProfile] = []
     if transport == "ssh":
         tunnel_config = load_tunnel_config()
-        candidate_bridges = _ordered_bridges_for_sync(tunnel_config)
+        candidate_bridges = _ordered_bridges_for_sync(tunnel_config, source=source)
         if not candidate_bridges:
             hint = "Use 'inspire tunnel list' or 'inspire notebook ssh <id>' first."
             emit_output_error(

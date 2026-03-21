@@ -69,6 +69,28 @@ def make_gpu_only_no_internet_tunnel_config() -> TunnelConfig:
     return tunnel_config
 
 
+def make_mixed_internet_and_offline_tunnel_config(
+    *, default_bridge: str = "cpu-main"
+) -> TunnelConfig:
+    tunnel_config = TunnelConfig()
+    tunnel_config.add_bridge(
+        BridgeProfile(
+            name="cpu-main",
+            proxy_url="https://cpu.example.com",
+            has_internet=True,
+        )
+    )
+    tunnel_config.add_bridge(
+        BridgeProfile(
+            name="gpu-offline",
+            proxy_url="https://gpu-offline.example.com",
+            has_internet=False,
+        )
+    )
+    tunnel_config.default_bridge = default_bridge
+    return tunnel_config
+
+
 def _patch_common_git_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_cmd_module, "get_current_branch", lambda: "main")
     monkeypatch.setattr(sync_cmd_module, "get_current_commit_sha", lambda revision="HEAD": "a" * 40)
@@ -405,6 +427,51 @@ def test_sync_source_bundle_force_passes_hard_reset_flag(
 
     assert result.exit_code == EXIT_SUCCESS
     assert bundle_kwargs["force"] is True
+
+
+def test_sync_source_bundle_prefers_offline_bridge_before_internet_bridge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_sync_config(tmp_path)
+    checked_bridges: list[str] = []
+    bundle_kwargs: Dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        Config,
+        "from_files_and_env",
+        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
+    )
+    _patch_common_git_helpers(monkeypatch)
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "load_tunnel_config",
+        lambda: make_mixed_internet_and_offline_tunnel_config(default_bridge="cpu-main"),
+    )
+
+    def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
+        bridge_name = kwargs["bridge_name"]
+        checked_bridges.append(bridge_name)
+        return bridge_name == "gpu-offline"
+
+    monkeypatch.setattr(sync_cmd_module, "is_tunnel_available", fake_is_tunnel_available)
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "sync_via_ssh_bundle",
+        lambda *args, **kwargs: bundle_kwargs.update(kwargs)
+        or {"success": True, "synced_sha": "a" * 40, "error": None},
+    )
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "sync_via_ssh",
+        lambda *args, **kwargs: {"success": False, "synced_sha": None, "error": "should not run"},
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "bundle"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert checked_bridges[0] == "gpu-offline"
+    assert bundle_kwargs["bridge_name"] == "gpu-offline"
 
 
 def test_sync_resolves_commit_and_message_from_current_branch(
