@@ -37,9 +37,7 @@ _PUBLIC_SOURCE_CHOICES = ("official", "public", "private", "all")
 _ALL_SOURCE_KEYS = ("official", "public", "private", "my-private")
 
 
-def _parse_source_value(
-    _ctx: click.Context, _param: click.Parameter, value: str
-) -> str:
+def _parse_source_value(_ctx: click.Context, _param: click.Parameter, value: str) -> str:
     """Parse image source values while keeping deprecated aliases hidden from help."""
     normalized = value.strip().lower()
     if normalized in _PUBLIC_SOURCE_CHOICES:
@@ -620,7 +618,10 @@ def set_default_image_cmd(
         )
         return
 
-    config_path = Path(".inspire") / "config.toml"
+    from inspire.config.toml import _find_project_config
+
+    existing_config = _find_project_config()
+    config_path = existing_config if existing_config else Path(".inspire") / "config.toml"
 
     # Read existing config if present
     existing_data: dict = {}

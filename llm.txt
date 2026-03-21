@@ -81,6 +81,8 @@ inspire init
 - `inspire bridge ssh` and `inspire bridge scp` should validate explicit `--bridge` names first and return `BridgeNotFound` guidance when missing (`inspire tunnel list`).
 - For tunnel failures (profile exists but SSH unavailable), the recovery flow is `inspire tunnel status`, then re-create via `inspire notebook ssh <notebook-id> --save-as <name>` when needed.
 - For notebook-backed bridge profiles, `bridge exec` and `bridge ssh` should fail fast when notebook detail explicitly reports a non-`RUNNING` status, instead of burning rebuild retries against `PENDING` / `STOPPED` instances.
+- `bridge exec` accepts command parts after `--` and supports stdin passthrough via `--stdin` / `--bash-stdin`; redirected files and pipes should also enable stdin passthrough automatically.
+- Invalid `remote_env` keys should fail early as `ConfigError` before any tunnel or workflow work starts.
 - There is no `inspire tunnel start` command in this CLI.
 - `BridgeProfile` supports optional `notebook_id`; notebook SSH fast-path reuse is only valid when cached `notebook_id` matches the requested notebook.
 - `generate_ssh_config()` must reuse `_get_proxy_command()` so `ProxyCommand` remains shell-quoted and safe for URLs/paths with special characters.
@@ -94,6 +96,7 @@ inspire init
 - Push defaults are compatibility-preserving: `required` for remote/workflow sync, `best-effort` for bundle sync, unless `--push-mode` or `--no-push` overrides them.
 - `--branch` is removed.
 - `--transport workflow` remains an explicit fallback mode; there is no automatic SSH-to-workflow fallback.
+- `image set-default` should update the nearest project-root `.inspire/config.toml`, not blindly create a nested config in the current working directory.
 
 ## Configuration Model
 

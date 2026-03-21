@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import select
+import shlex
 import subprocess
 import time
 from typing import Callable, Optional
@@ -70,6 +71,11 @@ def _build_stdin_script(command: str) -> str:
     return f"export LC_ALL=C LANG=C; {command}\n"
 
 
+def _wrap_remote_command(command: str) -> str:
+    """Wrap a remote command for SSH argv-based execution."""
+    return f"bash -l -c {shlex.quote(command)}"
+
+
 def _build_ssh_base_args(
     *,
     bridge: BridgeProfile,
@@ -109,24 +115,34 @@ def run_ssh_command(
     check: bool = False,
     *,
     quiet_proxy: bool = True,
+    pass_stdin: bool = False,
 ) -> subprocess.CompletedProcess:
     """Execute a command on Bridge via SSH ProxyCommand."""
     _config, bridge, proxy_cmd = _resolve_bridge_and_proxy(bridge_name, config, quiet=quiet_proxy)
     ssh_cmd = _build_ssh_base_args(bridge=bridge, proxy_cmd=proxy_cmd)
-    ssh_cmd.append("bash -l")
+    input_payload: Optional[str] = None
+    if pass_stdin:
+        ssh_cmd.append(_wrap_remote_command(command))
+    else:
+        ssh_cmd.append("bash -l")
+        input_payload = _build_stdin_script(command)
 
     logger.debug(
-        "run_ssh_command bridge=%s timeout=%s capture_output=%s quiet_proxy=%s command=%s",
+        (
+            "run_ssh_command bridge=%s timeout=%s capture_output=%s "
+            "quiet_proxy=%s pass_stdin=%s command=%s"
+        ),
         bridge.name,
         timeout,
         capture_output,
         quiet_proxy,
+        pass_stdin,
         command,
     )
 
     result = subprocess.run(
         ssh_cmd,
-        input=_build_stdin_script(command),
+        input=input_payload,
         capture_output=capture_output,
         text=True,
         timeout=timeout,
@@ -183,18 +199,26 @@ def run_ssh_command_streaming(
     config: Optional[TunnelConfig] = None,
     timeout: Optional[int] = None,
     output_callback: Optional[Callable[[str], None]] = None,
+    *,
+    pass_stdin: bool = False,
 ) -> int:
     """Execute a command on Bridge via SSH with streaming output."""
     import click
 
     _config, bridge, proxy_cmd = _resolve_bridge_and_proxy(bridge_name, config)
     ssh_cmd = _build_ssh_base_args(bridge=bridge, proxy_cmd=proxy_cmd)
-    ssh_cmd.append("bash -l")
+    popen_stdin = subprocess.PIPE
+    if pass_stdin:
+        ssh_cmd.append(_wrap_remote_command(command))
+        popen_stdin = None
+    else:
+        ssh_cmd.append("bash -l")
 
     logger.debug(
-        "run_ssh_command_streaming bridge=%s timeout=%s command=%s",
+        "run_ssh_command_streaming bridge=%s timeout=%s pass_stdin=%s command=%s",
         bridge.name,
         timeout,
+        pass_stdin,
         command,
     )
 
@@ -208,7 +232,7 @@ def run_ssh_command_streaming(
 
     process = subprocess.Popen(
         ssh_cmd,
-        stdin=subprocess.PIPE,
+        stdin=popen_stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         bufsize=1,
@@ -217,9 +241,11 @@ def run_ssh_command_streaming(
     )
 
     # Feed the command via stdin so it never appears in the process cmdline.
-    script = _build_stdin_script(command)
-    process.stdin.write(script)
-    process.stdin.close()
+    if not pass_stdin:
+        script = _build_stdin_script(command)
+        if process.stdin is not None:
+            process.stdin.write(script)
+            process.stdin.close()
 
     start_time = time.time()
 
@@ -278,6 +304,7 @@ __all__ = [
     "_build_ssh_process_env",
     "_build_ssh_base_args",
     "_build_stdin_script",
+    "_wrap_remote_command",
     "_resolve_bridge_and_proxy",
     "get_ssh_command_args",
     "run_ssh_command",

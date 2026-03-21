@@ -9,7 +9,10 @@
 - `inspire notebook ssh` now supports `ssh.rtunnel_upload_policy` / `INSPIRE_RTUNNEL_UPLOAD_POLICY` / `--rtunnel-upload-policy` to control Contents API upload fallback, and reuses an existing notebook-side `rtunnel` binary when the `.sha256` sidecar matches the local copy.
 - `inspire notebook ssh` no longer auto-uploads a host-local `Darwin` `rtunnel` binary as fallback on non-`Linux` machines. In `auto` mode it now skips that incompatible upload path and lets the notebook download a Linux-compatible binary instead.
 - `inspire bridge exec` and `inspire bridge ssh` now fast-fail when a notebook-backed bridge points to a notebook that is not yet `RUNNING`, instead of wasting tunnel rebuild attempts against `PENDING` or `STOPPED` instances.
+- `inspire bridge exec` now supports explicit stdin passthrough via `--stdin` / `--bash-stdin`, accepts command forms such as `inspire bridge exec -- bash -s`, and auto-enables stdin passthrough for redirected files and pipes.
+- `bridge exec` and `bridge ssh` now validate `remote_env` before any tunnel or workflow work starts, so invalid keys fail deterministically as `ConfigError`.
 - `inspire sync --source bundle` now prefers offline bridge profiles before internet-capable ones when both are configured, while preserving the fork's existing `--source auto` and push-default semantics for compatibility.
+- `inspire image set-default` now updates the nearest project-root `.inspire/config.toml`, even when the command is run from a nested subdirectory.
 
 ## v0.2.11 (2026-03-12)
 

@@ -124,7 +124,7 @@ inspire notebook ssh <id>                       # SSH into instance (auto-establ
 | Command                          | Description                                                          |
 | -------------------------------- | -------------------------------------------------------------------- |
 | `inspire sync`                   | Sync code to shared filesystem (SSH default; explicit `--source bundle` prefers offline bridges; `--transport workflow`) |
-| `inspire bridge exec "<cmd>"`    | Execute command on remote `INSPIRE_TARGET_DIR`                       |
+| `inspire bridge exec "<cmd>"`    | Execute command on remote `INSPIRE_TARGET_DIR`, including `--stdin -- bash -s` |
 | `inspire bridge ssh`             | Open interactive SSH shell                                           |
 | `inspire bridge scp <src> <dst>` | Upload/download files (`-r` recursive, `-d` download direction)      |
 
@@ -162,6 +162,9 @@ inspire run "python train.py --epochs 100" --sync --watch
 
 # Sync code and verify
 inspire sync && inspire bridge exec "git log -1"
+
+# Feed a local script to remote bash via stdin
+inspire bridge exec --stdin -- bash -s < scripts/bootstrap.sh
 
 # Set up SSH tunnel and save as Bridge Profile
 inspire notebook ssh <notebook-id> --save-as mybridge
@@ -366,6 +369,8 @@ If a tool only supports `SOCKS5`, switch to `socks5://127.0.0.1:7897`; the local
 - For offline notebooks, once the flow is using uploaded binaries or dropbear/apt-mirror bootstrap, the CLI skips doomed `curl` download fallbacks.
 - Images saved from instances with SSH installed will retain sshd — no need to reinstall.
 - `bridge exec` and `bridge ssh` auto-reconnect dropped tunnels for notebook-backed Profiles; when the linked notebook is explicitly not `RUNNING`, the CLI now fails fast with a start/wait hint instead of spinning through rebuild attempts. `bridge scp` only checks availability without rebuilding.
+- `bridge exec` supports `--stdin` / `--bash-stdin`, and also auto-enables stdin passthrough for redirected files and pipes. This is useful for commands such as `bash -s` that consume stdin.
+- `image set-default` now walks up to the nearest project `.inspire/config.toml`, so running it from a nested subdirectory still updates the project-root config.
 - rtunnel install script uses dynamic platform detection (`uname -s/-m`), independent of local host architecture.
 - `inspire --debug` writes a redacted debug report under `~/.cache/inspire-cli/logs/`, which is useful for tracing upload, terminal, and proxy failures.
 

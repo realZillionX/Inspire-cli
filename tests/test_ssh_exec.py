@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import shlex
 import subprocess
 from typing import Any, Optional
 
@@ -175,3 +176,68 @@ def test_run_ssh_command_streaming_does_not_reemit_lines_after_exit(
 
     assert exit_code == 2
     assert emitted == ["dupe\n"]
+
+
+def test_run_ssh_command_pass_stdin_uses_remote_command_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import inspire.bridge.tunnel.ssh_exec as ssh_exec_module
+
+    monkeypatch.setattr(ssh_exec_module, "_resolve_bridge_and_proxy", _stub_resolve)
+
+    captured: dict[str, Any] = {}
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(ssh_exec_module.subprocess, "run", fake_run)
+
+    result = run_ssh_command("echo ok", pass_stdin=True)
+
+    assert result.returncode == 0
+    assert captured["cmd"][-1] == f"bash -l -c {shlex.quote('echo ok')}"
+    assert captured["kwargs"]["input"] is None
+
+
+def test_run_ssh_command_streaming_pass_stdin_does_not_write_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import inspire.bridge.tunnel.ssh_exec as ssh_exec_module
+
+    monkeypatch.setattr(ssh_exec_module, "_resolve_bridge_and_proxy", _stub_resolve)
+
+    captured: dict[str, Any] = {}
+
+    class FakeStdout:
+        def readline(self) -> str:
+            return ""
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.stdin = None
+            self.stdout = FakeStdout()
+            self.returncode = 0
+
+        def poll(self) -> int:
+            return 0
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self) -> int:
+            return 0
+
+    def fake_popen(cmd: list[str], **kwargs: Any) -> FakeProcess:
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    monkeypatch.setattr(ssh_exec_module.subprocess, "Popen", fake_popen)
+
+    exit_code = run_ssh_command_streaming("echo hello", pass_stdin=True)
+
+    assert exit_code == 0
+    assert captured["cmd"][-1] == f"bash -l -c {shlex.quote('echo hello')}"
+    assert captured["kwargs"]["stdin"] is None

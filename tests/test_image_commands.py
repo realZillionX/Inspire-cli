@@ -928,6 +928,29 @@ def test_set_default_preserves_existing_config(
     assert "new-img" in content
 
 
+def test_set_default_from_subdirectory_uses_project_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_config_and_session(monkeypatch, tmp_path)
+
+    config_dir = tmp_path / ".inspire"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    config_path.write_text('[auth]\nusername = "test"\n')
+
+    subdir = tmp_path / "src" / "deep"
+    subdir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(subdir)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["image", "set-default", "--job", "subdir-img"])
+    assert result.exit_code == 0
+
+    content = config_path.read_text()
+    assert "subdir-img" in content
+    assert not (subdir / ".inspire" / "config.toml").exists()
+
+
 # ---------------------------------------------------------------------------
 # wait_for_image_ready tests
 # ---------------------------------------------------------------------------
