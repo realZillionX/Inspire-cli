@@ -76,22 +76,3 @@ base_url = "https://qz.sii.edu.cn"
 | `INSPIRE_PASSWORD` | 平台密码兜底 |
 | `INSPIRE_BASE_URL` | API 基地址 |
 | `INSPIRE_GLOBAL_CONFIG_PATH` | 全局配置文件路径覆盖 |
-
-## 开发与贡献
-
-如果只是本地试用 CLI，参考上面的“本地开发”。若要修改仓库本身，建议至少跑完与 CI 对齐的检查：
-
-| 目标 | 命令 |
-| --- | --- |
-| 安装开发依赖 | `uv sync --group dev` |
-| 运行测试 | `uv run pytest -x -q --tb=short` |
-| 运行静态检查 | `uv run ruff check inspire tests` |
-| 检查格式 | `uv run black --check inspire tests` |
-
-可选预检：`uv run pre-commit run --all-files`
-
-提交时请使用 [Conventional Commits](https://www.conventionalcommits.org/) 前缀（如 `feat:`、`fix:`、`docs:`、`chore:`）；若改动会影响用户可见行为，请同步更新 [CHANGELOG.md](CHANGELOG.md)。
-
-## 许可证
-
-当前仓库**未附带单独的 `LICENSE` 文件**。打包元数据在 [pyproject.toml](pyproject.toml) 中声明为 `LicenseRef-Proprietary`；使用、复制和分发需获得 **Inspire Platform Team** 授权。

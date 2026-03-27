@@ -76,22 +76,3 @@ For the full list, run `inspire config env`.
 | `INSPIRE_PASSWORD` | Platform password fallback |
 | `INSPIRE_BASE_URL` | API base URL |
 | `INSPIRE_GLOBAL_CONFIG_PATH` | Override path for the global config file |
-
-## Development & Contributing
-
-If you only want to try the CLI locally, use the "Local Development" section above. If you are changing the repository itself, run at least the same checks as CI:
-
-| Goal | Command |
-| --- | --- |
-| Install dev dependencies | `uv sync --group dev` |
-| Run tests | `uv run pytest -x -q --tb=short` |
-| Run lint | `uv run ruff check inspire tests` |
-| Check formatting | `uv run black --check inspire tests` |
-
-Optional preflight: `uv run pre-commit run --all-files`
-
-Use [Conventional Commits](https://www.conventionalcommits.org/) prefixes such as `feat:`, `fix:`, `docs:`, and `chore:`. If a change affects user-visible behavior, update [CHANGELOG.md](CHANGELOG.md) in the same patch.
-
-## License
-
-This repository **does not currently ship a separate `LICENSE` file**. Packaging metadata in [pyproject.toml](pyproject.toml) declares `LicenseRef-Proprietary`; use, copying, and redistribution require authorization from the **Inspire Platform Team**.
