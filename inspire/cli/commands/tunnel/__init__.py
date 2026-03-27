@@ -16,27 +16,28 @@ from .update import tunnel_update
 
 @click.group()
 def tunnel() -> None:
-    """Manage SSH tunnels for fast Bridge access.
+    """Manage SSH tunnel profiles for fast Bridge access.
 
-    Supports multiple bridge profiles. Commands like 'bridge exec' and
-    'job logs' automatically use SSH when a bridge is configured.
+    The main flow is notebook-backed: use ``inspire notebook ssh <id> --save-as
+    <name>`` to create or refresh a bridge profile, then reuse it with
+    ``inspire bridge exec`` or ``ssh <name>``. There is no ``tunnel start``
+    subcommand; profiles are created by ``notebook ssh --save-as`` or
+    ``tunnel add``.
 
     \b
     Quick Start:
-        1. Set up rtunnel server on Bridge
-        2. inspire tunnel add mybridge "https://nat-notebook.../proxy/31337/"
-        3. inspire tunnel status              # Verify connection
-        4. inspire bridge exec "hostname"     # Now uses fast SSH!
+        1. inspire notebook ssh <id> --save-as mybridge
+        2. inspire tunnel status
+        3. inspire bridge exec --bridge mybridge "hostname"
 
     \b
-    Multiple bridges:
+    Manual profiles:
         inspire tunnel add bridge1 "https://..."
         inspire tunnel add bridge2 "https://..."
         inspire tunnel list
-        inspire bridge exec --bridge bridge2 "hostname"
 
     \b
-    For direct SSH access (scp, rsync, git):
+    For direct SSH access:
         inspire tunnel ssh-config --install
         ssh bridge1
     """

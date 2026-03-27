@@ -38,7 +38,8 @@ _RUNNING_NOTEBOOK_STATUS = "RUNNING"
 def bridge_ssh(ctx: Context, bridge: Optional[str]) -> None:
     """Open an interactive SSH shell to Bridge.
 
-    Requires a configured bridge profile with a reachable SSH tunnel.
+    Requires a saved bridge profile with a reachable SSH tunnel. Create one
+    with ``inspire notebook ssh <id> --save-as <name>``.
 
     \b
     Example:

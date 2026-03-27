@@ -47,6 +47,11 @@ def _extract_data(result: dict[str, Any]) -> dict[str, Any]:
     return data if isinstance(data, dict) else result
 
 
+def _looks_like_full_slurm_script(entrypoint: str) -> bool:
+    stripped = entrypoint.lstrip()
+    return stripped.startswith("#!") or "#SBATCH" in entrypoint
+
+
 def _format_hpc_list_rows(rows: list[dict[str, str]]) -> str:
     """Format HPC job rows into a compact table."""
     if not rows:
@@ -142,7 +147,12 @@ def list_hpc(
 
 @click.command("create")
 @click.option("--name", "-n", required=True, help="HPC job name")
-@click.option("--entrypoint", "-c", required=True, help="Entrypoint command")
+@click.option(
+    "--entrypoint",
+    "-c",
+    required=True,
+    help="Slurm script body (omit #SBATCH headers; use srun for the payload)",
+)
 @click.option(
     "--logic-compute-group-id",
     required=True,
@@ -151,7 +161,7 @@ def list_hpc(
 @click.option(
     "--spec-id",
     required=True,
-    help="HPC spec ID (predef_quota_id; use inspire resources specs --usage hpc)",
+    help="HPC predef_quota_id (use inspire resources specs --usage hpc)",
 )
 @click.option(
     "--project",
@@ -170,9 +180,9 @@ def list_hpc(
 @click.option("--instance-count", type=int, default=1, show_default=True, help="Instance count")
 @click.option(
     "--priority",
-    type=int,
+    type=click.IntRange(1, 10),
     default=None,
-    help="Task priority 1-10 (default from config [job].priority or 10)",
+    help="Task priority 1-10 (higher numbers request higher priority; project quota may cap it)",
 )
 @click.option("--number-of-tasks", type=int, default=1, show_default=True, help="Number of tasks")
 @click.option("--cpus-per-task", type=int, required=True, help="CPUs per task")
@@ -202,7 +212,11 @@ def create_hpc(
     memory_per_cpu: int,
     enable_hyper_threading: bool,
 ) -> None:
-    """Create a high-performance computing (HPC) job."""
+    """Create a Slurm-backed HPC job.
+
+    ``-c/--entrypoint`` must be the Slurm script body. Do not include ``#SBATCH``
+    headers; use ``srun`` to launch the payload.
+    """
     try:
         config, _ = Config.from_files_and_env(require_target_dir=False)
         api = AuthManager.get_api(config)
@@ -221,6 +235,15 @@ def create_hpc(
         final_image = image if image is not None else config.job_image
         if not final_image:
             raise ConfigError("Missing image. Set --image or configure [job].image / INSP_IMAGE.")
+        if _looks_like_full_slurm_script(entrypoint):
+            _handle_error(
+                ctx,
+                "ValidationError",
+                "HPC entrypoint must be the Slurm body, not a full sbatch script.",
+                EXIT_CONFIG_ERROR,
+                hint="Pass only the lines after the #SBATCH headers and launch the workload with srun.",
+            )
+            return
 
         result = api.create_hpc_job(
             name=name,
@@ -250,6 +273,8 @@ def create_hpc(
         click.echo(f"Project:   {resolved_project_id}")
         click.echo(f"Workspace: {resolved_workspace_id}")
         click.echo(f"Spec:      {spec_id}")
+        if final_priority is not None:
+            click.echo(f"Requested Priority: {final_priority}")
         click.echo(f"Entry:     {entrypoint}")
 
     except ConfigError as e:
@@ -281,6 +306,12 @@ def status_hpc(ctx: Context, job_id: str) -> None:
         click.echo(f"Job ID: {data.get('job_id', job_id)}")
         click.echo(f"Name:   {data.get('name', 'N/A')}")
         click.echo(f"Status: {data.get('status', 'N/A')}")
+        if data.get("priority") is not None:
+            click.echo(f"Requested Priority: {data.get('priority')}")
+        if data.get("priority_name"):
+            click.echo(f"Priority Name: {data.get('priority_name')}")
+        if data.get("priority_level"):
+            click.echo(f"Priority Level: {data.get('priority_level')}")
         if data.get("sub_status"):
             click.echo(f"Sub:    {data.get('sub_status')}")
         if data.get("created_at"):

@@ -789,6 +789,25 @@ def test_image_save_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     assert captured["notebook_id"] == "notebook-abc"
 
 
+def test_image_save_human_output_handles_missing_image_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_config_and_session(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        browser_api_module,
+        "save_notebook_as_image",
+        lambda notebook_id, name, version="v1", description="", session=None: {"image": {}},
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["image", "save", "notebook-abc", "-n", "saved-img"])
+
+    assert result.exit_code == 0
+    assert "Notebook saved as image: unknown" in result.output
+    assert "image list --source private" in result.output
+
+
 def test_image_delete_with_force(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_config_and_session(monkeypatch, tmp_path)
 

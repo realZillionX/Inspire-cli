@@ -85,7 +85,7 @@ def _should_stop_after_match(usage: str) -> bool:
     type=click.Choice(["auto", "notebook", "hpc", "all"], case_sensitive=False),
     default="auto",
     show_default=True,
-    help="Spec family to query",
+    help="Spec family to query (auto = HPC first, then notebook/DSW)",
 )
 @click.option("--include-empty", is_flag=True, help="Include compute groups that return no specs")
 @click.option("--json", "json_output_local", is_flag=True, help="Alias for global --json")
@@ -100,6 +100,8 @@ def list_specs(
     json_output_local: bool,
 ) -> None:
     """Discover resource specs for notebook/HPC creation.
+
+    ``auto`` checks HPC quotas first and falls back to notebook/DSW quotas.
 
     Returns per-spec entries including:
     - logic_compute_group_id

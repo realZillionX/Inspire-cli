@@ -56,7 +56,10 @@ def _apply_profile_option(
     "--json",
     "json_output",
     is_flag=True,
-    help="Output as JSON (machine-readable)",
+    help=(
+        "Output as JSON (machine-readable). As a global option, place it before the "
+        "subcommand unless that command provides a local --json alias."
+    ),
 )
 @click.option(
     "--debug",
@@ -69,6 +72,12 @@ def main(ctx: Context, json_output: bool, debug: bool) -> None:
 
     Interact with the Inspire HPC platform to submit training jobs,
     monitor their status, and retrieve logs.
+
+    \b
+    JSON output:
+        Global --json must appear before the subcommand, e.g.:
+            inspire --json hpc status <job-id>
+        Some subcommands also provide a local --json alias.
 
     \b
     Examples:

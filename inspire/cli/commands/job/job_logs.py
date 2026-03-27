@@ -1100,7 +1100,7 @@ def _run_job_logs_single_job(
 @click.option(
     "--bridge",
     "-b",
-    help="Bridge profile to use for SSH tunnel fast path",
+    help="Bridge profile to use for the SSH tunnel fast path before workflow fallback",
 )
 @pass_context
 def logs(
@@ -1118,7 +1118,8 @@ def logs(
 ) -> None:
     """View logs for a training job.
 
-    Fetches logs via Gitea workflow and caches them locally.
+    Prefers the SSH tunnel fast path when a bridge profile is available.
+    Otherwise, fetches logs via Gitea workflow and caches them locally.
     Incremental fetching is enabled by default - only new bytes are
     fetched when a local cache exists. Use --refresh to re-fetch from
     the beginning.

@@ -100,6 +100,15 @@ def _patch_common_git_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_cmd_module, "has_uncommitted_changes", lambda: False)
 
 
+def test_sync_help_mentions_transport_model() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync", "--help"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "--transport" in result.output
+    assert "--source" in result.output
+    assert "bridge scp" not in result.output
+
+
 def test_sync_ssh_preflight_happens_before_push(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

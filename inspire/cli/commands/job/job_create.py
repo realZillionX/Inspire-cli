@@ -132,7 +132,7 @@ def run_job_create(
 
         selected_project_id = selected.project_id
 
-        # Cap priority to the selected project's max priority
+        # Cap priority to the selected project's max priority.
         if selected.priority_name:
             try:
                 max_priority = int(selected.priority_name)
@@ -188,6 +188,8 @@ def run_job_create(
             click.echo(human_formatter.format_success(f"Job created: {job_id}"))
             click.echo(f"\nName:     {name}")
             click.echo(f"Resource: {resource}")
+            if priority is not None:
+                click.echo(f"Priority: {priority}")
             if nodes > 1:
                 click.echo(f"Nodes:    {nodes}")
             max_cmd_len = 80
@@ -229,7 +231,10 @@ def run_job_create(
     "--priority",
     type=int,
     default=None,
-    help="Task priority 1-10 (default from config [job].priority or 10)",
+    help=(
+        "Requested priority 1-10 (higher numbers request higher priority; "
+        "project quota may cap it). Check `inspire job status` for priority_level."
+    ),
 )
 @click.option("--max-time", type=float, default=100.0, help="Max runtime in hours (default: 100)")
 @click.option("--location", help="Preferred datacenter location")
@@ -280,22 +285,8 @@ def create(
 ) -> None:
     """Create a new training job.
 
-    IMPORTANT: Always set INSPIRE_TARGET_DIR before running this command (from your laptop).
-    This path should point to the shared filesystem on Bridge where training logs will be written
-    (e.g., /train/logs).
-
-    The command you provide will be wrapped to redirect stdout/stderr to this target directory:
-      wrapped_command = (cd /training/code && bash train.sh) > /train/logs/job_name.log 2>&1
-
-    When creating a job:
-      - The wrapped command is sent to Inspire API
-      - Inspire executes it on the Bridge machine
-      - Logs are written to INSPIRE_TARGET_DIR on Bridge
-      - log_path is cached in ~/.inspire/jobs.json for later retrieval
-
-    When retrieving logs later:
-      - Set INSPIRE_TARGET_DIR to the same path used during job creation
-      - Use `inspire job logs <job_id>` to fetch logs via Gitea bridge
+    If ``INSPIRE_TARGET_DIR`` is configured, stdout/stderr are captured under that
+    shared directory for later ``inspire job logs`` retrieval.
 
     \b
     Examples:
@@ -303,6 +294,12 @@ def create(
         inspire job create --name "pr-123" --resource "4xH200" --command "cd /path/to/code && bash train.sh"
         inspire job create -n test -r H200 -c "python train.py" --priority 9
         inspire job create -n test -r 4xH200 -c "python train.py" --no-auto
+
+    \b
+    Priority:
+        Requested priority is capped by the selected project quota. Use
+        `inspire job status <job-id>` to inspect the platform-assigned
+        priority_level.
     """
     run_job_create(
         ctx,

@@ -86,6 +86,8 @@ def _run_sync_if_requested(ctx: Context, *, sync: bool, watch: bool) -> None:
 
     if ctx.debug and not ctx.json_output:
         click.echo("Syncing code...")
+    elif watch and not sync and not ctx.json_output:
+        click.echo("Syncing code first (--watch implies --sync).")
 
     if _check_uncommitted_changes():
         _handle_error(
@@ -310,12 +312,16 @@ def _run_flow(
                 click.echo(f"Resource: {resource_str}")
                 if nodes > 1:
                     click.echo(f"Nodes: {nodes}")
+                if priority is not None:
+                    click.echo(f"Priority: {priority}")
                 click.echo(
                     f"Command: {wrapped_command[:80]}{'...' if len(wrapped_command) > 80 else ''}"
                 )
                 if log_path:
                     click.echo(f"Log file: {log_path}")
-                click.echo(f"Check status with: inspire job status {job_id}")
+            elif priority is not None:
+                click.echo(f"Priority: {priority}")
+            click.echo(f"Check status with: inspire job status {job_id}")
 
         if watch:
             if ctx.json_output:
@@ -351,13 +357,26 @@ def _run_flow(
     help="GPU type (default: H200)",
 )
 @click.option("--name", "-n", help="Job name (auto-generated if not specified)")
-@click.option("--sync", "-s", is_flag=True, help="Sync code before running")
-@click.option("--watch", "-w", is_flag=True, help="Sync, run, then follow logs")
+@click.option(
+    "--sync",
+    "-s",
+    is_flag=True,
+    help="Sync code before running (implied by --watch)",
+)
+@click.option(
+    "--watch",
+    "-w",
+    is_flag=True,
+    help="Sync code, run, then follow logs (implies --sync)",
+)
 @click.option(
     "--priority",
     type=int,
     default=None,
-    help="Task priority 1-10 (default from config [job].priority or 10)",
+    help=(
+        "Requested priority 1-10 (higher numbers request higher priority; "
+        "project quota may cap it). Check `inspire job status` for priority_level."
+    ),
 )
 @click.option(
     "--project",
@@ -415,6 +434,12 @@ def run(
         1. Sync code (if --sync or --watch)
         2. Create job
         3. Follow logs until completion
+
+    \b
+    Priority:
+        Requested priority is capped by the selected project quota. Use
+        `inspire job status <job-id>` to inspect the platform-assigned
+        priority_level.
     """
     _run_flow(
         ctx,

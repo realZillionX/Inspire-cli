@@ -86,6 +86,67 @@ def test_bridge_scp_upload_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert result.output.strip() == "OK"
 
 
+def test_bridge_scp_warns_when_remote_path_is_relative(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    local_file = tmp_path / "test.txt"
+    local_file.write_text("hello")
+
+    tunnel_config = TunnelConfig()
+    tunnel_config.add_bridge(BridgeProfile(name="default", proxy_url="https://proxy.example.com"))
+
+    monkeypatch.setattr(scp_cmd_module, "load_tunnel_config", lambda: tunnel_config)
+    monkeypatch.setattr(scp_cmd_module, "is_tunnel_available", lambda **kw: True)
+
+    class FakeResult:
+        returncode = 0
+
+    monkeypatch.setattr(
+        scp_cmd_module,
+        "run_scp_transfer",
+        lambda **kw: FakeResult(),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        ["bridge", "scp", str(local_file), "artifacts/test.txt"],
+    )
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "does not use INSPIRE_TARGET_DIR" in result.output
+    assert "Warning: remote destination 'artifacts/test.txt'" in result.output
+
+
+def test_bridge_scp_warns_when_remote_source_is_relative_on_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tunnel_config = TunnelConfig()
+    tunnel_config.add_bridge(BridgeProfile(name="default", proxy_url="https://proxy.example.com"))
+
+    monkeypatch.setattr(scp_cmd_module, "load_tunnel_config", lambda: tunnel_config)
+    monkeypatch.setattr(scp_cmd_module, "is_tunnel_available", lambda **kw: True)
+
+    class FakeResult:
+        returncode = 0
+
+    monkeypatch.setattr(
+        scp_cmd_module,
+        "run_scp_transfer",
+        lambda **kw: FakeResult(),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        ["bridge", "scp", "-d", "artifacts/test.txt", str(tmp_path / "local.txt")],
+    )
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "does not use INSPIRE_TARGET_DIR" in result.output
+    assert "Warning: remote source 'artifacts/test.txt'" in result.output
+
+
 def test_bridge_scp_download_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tunnel_config = TunnelConfig()
     tunnel_config.add_bridge(BridgeProfile(name="default", proxy_url="https://proxy.example.com"))

@@ -774,8 +774,8 @@ def list_notebooks(
 @click.option(
     "--save-as",
     help=(
-        "Save this notebook tunnel as a named profile (usable with 'ssh <name>' after "
-        "'inspire tunnel ssh-config --install')"
+        "Save this notebook tunnel as a named bridge profile for 'bridge ssh', "
+        "'bridge exec', and 'ssh <name>' after 'inspire tunnel ssh-config --install'"
     ),
 )
 @click.option(
@@ -810,7 +810,7 @@ def list_notebooks(
     "--rtunnel-upload-policy",
     type=click.Choice(["auto", "never", "always"], case_sensitive=False),
     default=None,
-    help="Rtunnel upload fallback: auto, never, or always",
+    help="Rtunnel upload fallback: auto, never, or always (overrides config/env)",
 )
 @click.option(
     "--debug-playwright",
@@ -840,7 +840,19 @@ def ssh_notebook_cmd(
     debug_playwright: bool,
     setup_timeout: int,
 ) -> None:
-    """SSH into a running notebook instance via rtunnel ProxyCommand."""
+    """SSH into a notebook instance via rtunnel ProxyCommand.
+
+    The first run bootstraps the rtunnel/SSH toolchain. Use ``--save-as`` to
+    persist the tunnel as a bridge profile for ``bridge ssh`` and
+    ``bridge exec``. Notebook-backed profiles can be rebuilt automatically by
+    later ``bridge ssh`` / ``bridge exec`` runs when the tunnel drops.
+
+    \b
+    Examples:
+        inspire notebook ssh <id>
+        inspire notebook ssh <id> --save-as mybridge
+        inspire notebook ssh <id> --command "hostname"
+    """
     run_notebook_ssh(
         ctx,
         notebook_id=notebook,

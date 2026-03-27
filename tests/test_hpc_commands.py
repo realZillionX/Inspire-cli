@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from inspire import config as config_module
+from inspire.cli.context import EXIT_CONFIG_ERROR
 from inspire.cli.main import main as cli_main
 from inspire.cli.utils import auth as auth_module
 from inspire.platform.web.browser_api.hpc_jobs import HPCJobInfo
@@ -111,6 +112,132 @@ def test_hpc_create_json_uses_alias_resolution(
     assert call["image"] == "registry.local/hpc:latest"
     assert call["cpus_per_task"] == 32
     assert call["memory_per_cpu"] == 8
+
+
+def test_hpc_create_help_highlights_slurm_body() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["hpc", "create", "--help"])
+
+    assert result.exit_code == 0
+    assert "Slurm script body" in result.output
+    assert "predef_quota_id" in result.output
+    assert "higher numbers request" in result.output
+    assert "higher priority; project quota may cap it" in result.output
+
+
+def test_hpc_create_human_output_includes_priority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_hpc_config_and_auth(monkeypatch, tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli_main,
+        [
+            "hpc",
+            "create",
+            "-n",
+            "hpc-demo",
+            "-c",
+            "srun python train.py",
+            "--logic-compute-group-id",
+            "lcg-123",
+            "--spec-id",
+            "spec-123",
+            "--cpus-per-task",
+            "32",
+            "--memory-per-cpu",
+            "8",
+            "--priority",
+            "7",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Requested Priority: 7" in result.output
+    assert "Entry:     srun python train.py" in result.output
+
+
+def test_hpc_create_rejects_priority_11() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "hpc",
+            "create",
+            "-n",
+            "hpc-demo",
+            "-c",
+            "srun python train.py",
+            "--logic-compute-group-id",
+            "lcg-123",
+            "--spec-id",
+            "spec-123",
+            "--cpus-per-task",
+            "32",
+            "--memory-per-cpu",
+            "8",
+            "--priority",
+            "11",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "1<=x<=10" in result.output
+
+
+def test_hpc_create_rejects_full_slurm_script(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_hpc_config_and_auth(monkeypatch, tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli_main,
+        [
+            "hpc",
+            "create",
+            "-n",
+            "hpc-demo",
+            "-c",
+            "#!/bin/bash\n#SBATCH --time=1:00:00\nsrun python train.py",
+            "--logic-compute-group-id",
+            "lcg-123",
+            "--spec-id",
+            "spec-123",
+            "--cpus-per-task",
+            "32",
+            "--memory-per-cpu",
+            "8",
+        ],
+    )
+
+    assert result.exit_code == EXIT_CONFIG_ERROR
+    assert "HPC entrypoint must be the Slurm body" in result.output
+
+
+def test_hpc_status_human_output_shows_priority_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    api = patch_hpc_config_and_auth(monkeypatch, tmp_path)
+    api.get_hpc_job_detail = lambda job_id: {
+        "data": {
+            "job_id": job_id,
+            "name": "hpc-demo",
+            "status": "RUNNING",
+            "priority": 7,
+            "priority_name": "7",
+            "priority_level": "HIGH",
+        }
+    }
+    runner = CliRunner()
+
+    result = runner.invoke(cli_main, ["hpc", "status", "hpc-job-123"])
+
+    assert result.exit_code == 0
+    assert "Requested Priority: 7" in result.output
+    assert "Priority Name: 7" in result.output
+    assert "Priority Level: HIGH" in result.output
 
 
 def test_hpc_status_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

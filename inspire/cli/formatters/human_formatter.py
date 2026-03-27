@@ -116,7 +116,11 @@ def format_job_status(job_data: Dict[str, Any]) -> str:
     if job_data.get("node_count"):
         fields.append(("Nodes", str(job_data["node_count"])))
     if job_data.get("priority"):
-        fields.append(("Priority", str(job_data["priority"])))
+        fields.append(("Requested Priority", str(job_data["priority"])))
+    if job_data.get("priority_name"):
+        fields.append(("Priority Name", str(job_data["priority_name"])))
+    if job_data.get("priority_level"):
+        fields.append(("Priority Level", str(job_data["priority_level"])))
     if job_data.get("sub_msg"):
         fields.append(("Message", job_data["sub_msg"][:40]))
 

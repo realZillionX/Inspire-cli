@@ -217,6 +217,15 @@ def test_resources_specs_include_empty(
     assert row["spec_id"] == ""
 
 
+def test_resources_specs_help_explains_auto_mode() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["resources", "specs", "--help"])
+
+    assert result.exit_code == 0
+    assert "auto = HPC first, then" in result.output
+    assert "notebook/DSW" in result.output
+
+
 def test_resources_specs_hpc_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

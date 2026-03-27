@@ -497,6 +497,11 @@ def save_image_cmd(
         return
 
     click.echo(f"Notebook saved as image: {image_id or 'unknown'}")
+    if not image_id:
+        click.echo(
+            "Platform did not return image_id. Run 'inspire image list --source private' "
+            "to find the saved image."
+        )
     if not wait and image_id:
         click.echo(f"Use 'inspire image detail {image_id}' to check build status.")
 

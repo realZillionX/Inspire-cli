@@ -37,6 +37,20 @@ def _scp_failure_details(result: object) -> str | None:
     return None
 
 
+def _warn_if_remote_path_is_relative(remote_path: str, *, download: bool) -> None:
+    if remote_path.startswith("/"):
+        return
+
+    role = "source" if download else "destination"
+    click.echo(
+        (
+            f"Warning: remote {role} '{remote_path}' is relative on the Bridge; "
+            "it does not use INSPIRE_TARGET_DIR. Prefer an absolute path."
+        ),
+        err=True,
+    )
+
+
 @click.command("scp")
 @click.argument("source")
 @click.argument("destination")
@@ -58,6 +72,8 @@ def bridge_scp(
 
     By default, uploads SOURCE (local) to DESTINATION (remote).
     Use --download to download SOURCE (remote) to DESTINATION (local).
+    Remote paths are literal and do not inherit INSPIRE_TARGET_DIR; relative
+    remote paths trigger a warning.
 
     \b
     Examples:
@@ -96,6 +112,8 @@ def bridge_scp(
         local_path, remote_path = destination, source
     else:
         local_path, remote_path = source, destination
+
+    _warn_if_remote_path_is_relative(remote_path, download=download)
 
     direction = "download" if download else "upload"
 

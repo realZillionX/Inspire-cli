@@ -1,15 +1,12 @@
-"""Sync command - Push local branch and sync code on Bridge.
+"""Sync command - push local branch and sync code on Bridge.
 
 Usage:
     inspire sync [--remote <remote>] [--transport <ssh|workflow>]
 
 This command:
-1. Pushes the current branch to the remote
-2. Syncs code on Bridge via selected transport
+1. Pushes the current branch to the configured git remote
+2. Syncs code on Bridge via the selected transport
 3. Returns the synced commit SHA
-
-If the git remote is unreachable, use 'inspire bridge scp' to transfer
-files directly.
 """
 
 from __future__ import annotations
@@ -589,10 +586,10 @@ def sync(
 ) -> None:
     """Sync local code to the Bridge shared filesystem.
 
-    This command pushes your local branch to the remote, then syncs to Bridge
-    using the selected transport:
-    - ssh: direct SSH tunnel sync (default; uses offline bundle mode if bridge has no internet)
-    - workflow: Git Actions workflow sync
+    This command pushes your local branch to the remote, then syncs code to
+    Bridge using the selected transport:
+    - ssh: direct SSH tunnel sync (default; uses bundle mode on offline bridges)
+    - workflow: GitHub/Gitea workflow sync
 
     \b
     Examples:
@@ -605,6 +602,7 @@ def sync(
         inspire sync --allow-dirty            # Sync committed branch tip even if worktree is dirty
         inspire sync --allow-dirty --no-push --source bundle --force
                                              # Also force-resets Bridge branch to selected commit
+        inspire sync --transport workflow --no-push
 
     \b
     Environment variables:
