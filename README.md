@@ -2,7 +2,7 @@
 
 # Inspire CLI
 
-启智（Inspire）平台的命令行工具。
+启智（Inspire）训练平台命令行工具 —— Notebook 管理、分布式训练 / 高性能计算提交、SSH 隧道、镜像管理、代码同步一站式解决。
 
 > **README 边界：** 本文档只保留安装与一次性配置。
 >
@@ -79,16 +79,19 @@ base_url = "https://qz.sii.edu.cn"
 
 ## 开发与贡献
 
-```bash
-uv venv .venv
-uv pip install -e .
-uv run pytest
-uv run ruff check inspire tests
-uv run black --check inspire tests
-```
+如果只是本地试用 CLI，参考上面的“本地开发”。若要修改仓库本身，建议至少跑完与 CI 对齐的检查：
 
-提交规范：使用 [Conventional Commits](https://www.conventionalcommits.org/) 前缀（`feat:`、`fix:`、`docs:`、`chore:`）。
+| 目标 | 命令 |
+| --- | --- |
+| 安装开发依赖 | `uv sync --group dev` |
+| 运行测试 | `uv run pytest -x -q --tb=short` |
+| 运行静态检查 | `uv run ruff check inspire tests` |
+| 检查格式 | `uv run black --check inspire tests` |
+
+可选预检：`uv run pre-commit run --all-files`
+
+提交时请使用 [Conventional Commits](https://www.conventionalcommits.org/) 前缀（如 `feat:`、`fix:`、`docs:`、`chore:`）；若改动会影响用户可见行为，请同步更新 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 
-详见 [LICENSE](LICENSE) 文件。
+当前仓库**未附带单独的 `LICENSE` 文件**。打包元数据在 [pyproject.toml](pyproject.toml) 中声明为 `LicenseRef-Proprietary`；使用、复制和分发需获得 **Inspire Platform Team** 授权。

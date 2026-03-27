@@ -2,7 +2,7 @@
 
 # Inspire CLI
 
-Command-line interface for the Inspire platform.
+CLI for the Inspire training platform — notebook lifecycle, distributed job / hpc job submission, SSH tunneling, image management, and code sync in one tool.
 
 > **README scope:** this file only covers installation and one-time setup.
 >
@@ -79,16 +79,19 @@ For the full list, run `inspire config env`.
 
 ## Development & Contributing
 
-```bash
-uv venv .venv
-uv pip install -e .
-uv run pytest
-uv run ruff check inspire tests
-uv run black --check inspire tests
-```
+If you only want to try the CLI locally, use the "Local Development" section above. If you are changing the repository itself, run at least the same checks as CI:
 
-Commit convention: use [Conventional Commits](https://www.conventionalcommits.org/) prefixes (`feat:`, `fix:`, `docs:`, `chore:`).
+| Goal | Command |
+| --- | --- |
+| Install dev dependencies | `uv sync --group dev` |
+| Run tests | `uv run pytest -x -q --tb=short` |
+| Run lint | `uv run ruff check inspire tests` |
+| Check formatting | `uv run black --check inspire tests` |
+
+Optional preflight: `uv run pre-commit run --all-files`
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) prefixes such as `feat:`, `fix:`, `docs:`, and `chore:`. If a change affects user-visible behavior, update [CHANGELOG.md](CHANGELOG.md) in the same patch.
 
 ## License
 
-See [LICENSE](LICENSE) file.
+This repository **does not currently ship a separate `LICENSE` file**. Packaging metadata in [pyproject.toml](pyproject.toml) declares `LicenseRef-Proprietary`; use, copying, and redistribution require authorization from the **Inspire Platform Team**.
