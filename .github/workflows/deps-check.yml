@@ -6,11 +6,13 @@ on:
 
 jobs:
   check-outdated:
-    runs-on: codeberg-small
+    runs-on: ubuntu-latest
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Add uv to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Check for outdated dependencies
         run: |
           echo "=== Outdated packages ==="

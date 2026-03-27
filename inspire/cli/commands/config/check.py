@@ -93,9 +93,24 @@ def _is_placeholder_host(host: str) -> bool:
     return any(host.endswith(suffix) for suffix in _PLACEHOLDER_HOST_SUFFIXES)
 
 
+def _should_validate_host_field(cfg: Config, field_name: str) -> bool:
+    if field_name == "gitea_server":
+        return bool(
+            getattr(cfg, "git_platform", None) == "gitea" or cfg.gitea_repo or cfg.gitea_token
+        )
+    if field_name == "github_server":
+        return bool(
+            getattr(cfg, "git_platform", None) == "github" or cfg.github_repo or cfg.github_token
+        )
+    return True
+
+
 def _find_placeholder_host_issues(cfg: Config, sources: dict[str, str]) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     for field_name, env_var in _HOST_VALIDATION_FIELDS:
+        if not _should_validate_host_field(cfg, field_name):
+            continue
+
         raw_value = getattr(cfg, field_name, None)
         if raw_value in (None, ""):
             continue

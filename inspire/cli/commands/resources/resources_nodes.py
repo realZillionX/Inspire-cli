@@ -88,7 +88,9 @@ def list_nodes(
     try:
         config = None
         try:
-            config, _ = Config.from_files_and_env(require_credentials=False, require_target_dir=False)
+            config, _ = Config.from_files_and_env(
+                require_credentials=False, require_target_dir=False
+            )
         except Exception:
             config = None
         session = get_web_session()
@@ -147,14 +149,17 @@ def list_nodes(
                 json_formatter.format_json(
                     {
                         "groups": filtered,
-                        "workspace_filter": workspace_id or ("all" if all_workspaces else "current"),
+                        "workspace_filter": workspace_id
+                        or ("all" if all_workspaces else "current"),
                         "total_full_free_nodes": sum(x["full_free_nodes"] for x in filtered),
                     }
                 )
             )
             return
 
-        show_workspace = len({row["workspace_name"] for row in filtered if row["workspace_name"]}) > 1
+        show_workspace = (
+            len({row["workspace_name"] for row in filtered if row["workspace_name"]}) > 1
+        )
         click.echo("")
         click.echo("📊 Full-Free 8-GPU Nodes by Compute Group")
         if show_workspace:
@@ -165,7 +170,9 @@ def list_nodes(
             click.echo("─" * 94)
         else:
             click.echo("─" * 78)
-            click.echo(f"{'Group':<25} {'Full Free':>10} {'Ready':>8} {'Total':>8} {'Free GPUs':>10}")
+            click.echo(
+                f"{'Group':<25} {'Full Free':>10} {'Ready':>8} {'Total':>8} {'Free GPUs':>10}"
+            )
             click.echo("─" * 78)
 
         total_full_free = 0

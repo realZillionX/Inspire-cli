@@ -802,7 +802,9 @@ def test_job_list_refreshes_live_status_across_workspaces(
         all_workspace_ids = ["ws-other", "ws-train"]
         storage_state = {}
 
-    monkeypatch.setattr(web_session_module, "get_web_session", lambda *args, **kwargs: FakeSession())
+    monkeypatch.setattr(
+        web_session_module, "get_web_session", lambda *args, **kwargs: FakeSession()
+    )
 
     def fake_list_jobs(workspace_id=None, page_num=1, page_size=100, session=None):  # noqa: ARG001
         if workspace_id == "ws-train":
@@ -951,7 +953,6 @@ def test_job_update_defaults_to_refresh_all_cached_active_jobs(
     assert payload["success"] is True
     assert len(payload["data"]["updated"]) == 12
     assert len(api.calls["get_job_detail"]) == 12
-
 
 
 def test_job_logs_path_and_tail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -1334,6 +1335,39 @@ def test_config_check_auth_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
     assert result.exit_code == EXIT_AUTH_ERROR
     assert "Authentication failed" in result.output
+
+
+def test_config_check_ignores_unused_default_gitea_placeholder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_test_config(tmp_path)
+    config.base_url = "https://my-inspire.internal"
+    config.docker_registry = TEST_DOCKER_REGISTRY
+    config.git_platform = "github"
+    config.gitea_repo = None
+    config.gitea_token = None
+
+    def fake_from_files_and_env(
+        cls, require_target_dir: bool = False, require_credentials: bool = True
+    ):  # type: ignore[override]
+        return config, {"base_url": config_module.SOURCE_ENV}
+
+    def fake_get_config_paths(cls):  # type: ignore[override]
+        return None, None
+
+    monkeypatch.setattr(
+        config_module.Config, "from_files_and_env", classmethod(fake_from_files_and_env)
+    )
+    monkeypatch.setattr(
+        config_module.Config, "get_config_paths", classmethod(fake_get_config_paths)
+    )
+    monkeypatch.setattr(auth_module.AuthManager, "get_api", lambda _cls, cfg=None: DummyAPI())
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["config", "check"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "Configuration looks good" in result.output
 
 
 def test_config_check_config_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

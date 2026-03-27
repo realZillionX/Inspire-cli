@@ -1,10 +1,15 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.0
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--fix]
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --group dev ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       - id: black
+        name: black
+        entry: uv run --group dev black
+        language: system
+        types_or: [python, pyi]
+        require_serial: true

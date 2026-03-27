@@ -70,7 +70,9 @@ def create_hpc_job(
         "task_priority": task_priority,
         "number_of_tasks": number_of_tasks,
         "cpus_per_task": str(cpus_per_task),
-        "memory_per_cpu": str(memory_per_cpu) if str(memory_per_cpu)[-1:].isalpha() else f"{memory_per_cpu}G",
+        "memory_per_cpu": (
+            str(memory_per_cpu) if str(memory_per_cpu)[-1:].isalpha() else f"{memory_per_cpu}G"
+        ),
         "enable_hyper_threading": enable_hyper_threading,
     }
 

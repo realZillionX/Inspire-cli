@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.12 (2026-03-27)
+
 ### Fix
 
 - Removed the legacy local `8888/1080` split-proxy guidance and auto-rewrite path. Proxy examples and runtime defaults now target the `Clash Verge` `7897` mixed port instead.
@@ -13,6 +15,18 @@
 - `bridge exec` and `bridge ssh` now validate `remote_env` before any tunnel or workflow work starts, so invalid keys fail deterministically as `ConfigError`.
 - `inspire sync --source bundle` now prefers offline bridge profiles before internet-capable ones when both are configured, while preserving the fork's existing `--source auto` and push-default semantics for compatibility.
 - `inspire image set-default` now updates the nearest project-root `.inspire/config.toml`, even when the command is run from a nested subdirectory.
+
+### Docs
+
+- Trimmed both README files so they stay focused on installation and one-time setup, and refreshed the top-level product description in Chinese and English.
+- Removed the obsolete root `llm.txt` helper document.
+- Removed the root `docs/` directory and moved the env bootstrap template to `scripts/inspire.env.template`.
+
+### Tooling
+
+- Added a repository `LICENSE` file that matches the existing proprietary package metadata.
+- Added `.pre-commit-config.yaml` with local `ruff` and `black` hooks driven by `uv`.
+- Migrated repository automation from `.forgejo/workflows/` to `.github/workflows/` and removed the redundant `bin/inspire` wrapper script.
 
 ## v0.2.11 (2026-03-12)
 

@@ -48,7 +48,7 @@ def rtunnel_download_url_shell_snippet() -> str:
     # do, then constructs the URL from RTUNNEL_RELEASE_BASE_URL.
     return (
         f'_RT_OS=$(uname -s 2>/dev/null | tr "[:upper:]" "[:lower:]"); '
-        f'_RT_ARCH=$(uname -m 2>/dev/null); '
+        f"_RT_ARCH=$(uname -m 2>/dev/null); "
         f'case "$_RT_OS" in darwin*) _RT_OS=darwin;; linux*) _RT_OS=linux;; *) _RT_OS=linux;; esac; '
         f'case "$_RT_ARCH" in arm64|aarch64) _RT_ARCH=arm64;; *) _RT_ARCH=amd64;; esac; '
         f'_RT_EXT=tar.gz; [ "$_RT_OS" = "windows" ] && _RT_EXT=zip; '
@@ -56,4 +56,8 @@ def rtunnel_download_url_shell_snippet() -> str:
     )
 
 
-__all__ = ["RTUNNEL_RELEASE_BASE_URL", "default_rtunnel_download_url", "rtunnel_download_url_shell_snippet"]
+__all__ = [
+    "RTUNNEL_RELEASE_BASE_URL",
+    "default_rtunnel_download_url",
+    "rtunnel_download_url_shell_snippet",
+]

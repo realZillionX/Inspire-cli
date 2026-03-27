@@ -311,9 +311,13 @@ def list_specs(
         if usage == "hpc":
             click.echo("Use spec_id with: inspire hpc create --spec-id <spec_id>")
         elif usage == "all":
-            click.echo("Use --usage notebook for notebook quotas and --usage hpc for HPC predef quotas.")
+            click.echo(
+                "Use --usage notebook for notebook quotas and --usage hpc for HPC predef quotas."
+            )
         elif usage == "auto":
-            click.echo("Auto mode prefers HPC predef quotas and falls back to notebook quotas when HPC is unavailable.")
+            click.echo(
+                "Auto mode prefers HPC predef quotas and falls back to notebook quotas when HPC is unavailable."
+            )
         else:
             click.echo("Use --usage hpc to discover HPC predef quotas for inspire hpc create.")
         click.echo("")

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEMPLATE="${1:-$ROOT/docs/inspire.env.template}"
+TEMPLATE="${1:-$ROOT/scripts/inspire.env.template}"
 OUTPUT="${2:-$ROOT/.env.inspire.local}"
 
 if [[ ! -f "$TEMPLATE" ]]; then

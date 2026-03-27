@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inspire-cli"
-version = "0.2.11"
-description = "CLI tool for the Inspire HPC training platform"
+version = "0.2.12"
+description = "CLI for the Inspire training platform: notebook lifecycle, distributed/HPC job submission, SSH tunneling, image management, and code sync"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "LicenseRef-Proprietary"
@@ -79,7 +79,7 @@ dev = [
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.2.11"
+version = "0.2.12"
 version_files = [
     "inspire/__init__.py:__version__",
     "pyproject.toml:^version"

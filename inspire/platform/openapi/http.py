@@ -59,7 +59,8 @@ def make_request_with_retry(
                 if attempt < api.config.max_retries:
                     wait = api.config.retry_delay * (attempt + 1)
                     logger.warning(
-                        "Rate limited (429), retrying in %ss...", wait,
+                        "Rate limited (429), retrying in %ss...",
+                        wait,
                     )
                     time.sleep(wait)
                     continue

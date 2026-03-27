@@ -98,7 +98,9 @@ def test_resources_specs_json(
     monkeypatch.setattr(specs_module.browser_api_module, "get_resource_prices", _fake_prices)
 
     runner = CliRunner()
-    result = runner.invoke(cli_main, ["--json", "resources", "specs", "--workspace", "分布式训练空间"])
+    result = runner.invoke(
+        cli_main, ["--json", "resources", "specs", "--workspace", "分布式训练空间"]
+    )
 
     assert result.exit_code == 0
     payload = json.loads(result.output)

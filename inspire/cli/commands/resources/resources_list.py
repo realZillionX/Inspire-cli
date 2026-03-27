@@ -82,7 +82,7 @@ def _resolve_workspace_scope(
     if show_all:
         seen: set[str] = set()
         workspace_ids: list[str] = []
-        for wid in (session.all_workspace_ids or []):
+        for wid in session.all_workspace_ids or []:
             if wid and wid not in seen:
                 seen.add(wid)
                 workspace_ids.append(wid)
@@ -149,7 +149,10 @@ def _format_availability_table(availability, workspace_mode: bool = False) -> No
 def _format_accurate_availability_table(availability, *, include_cpu: bool) -> None:
     gpu_rows = [a for a in availability if getattr(a, "resource_kind", "gpu") == "gpu"]
     cpu_rows = [a for a in availability if getattr(a, "resource_kind", "gpu") == "cpu"]
-    workspace_names = {str(getattr(a, "workspace_name", "") or getattr(a, "workspace_id", "")) for a in availability}
+    workspace_names = {
+        str(getattr(a, "workspace_name", "") or getattr(a, "workspace_id", ""))
+        for a in availability
+    }
     show_workspace = len(workspace_names - {""}) > 1
 
     lines = ["", "📊 Compute Group Availability (Accurate Real-Time)"]
@@ -224,7 +227,9 @@ def _format_accurate_availability_table(availability, *, include_cpu: bool) -> N
             )
 
     if include_cpu and cpu_rows:
-        widths = [14, 25, 10, 10, 10, 12, 12, 12] if show_workspace else [25, 10, 10, 10, 12, 12, 12]
+        widths = (
+            [14, 25, 10, 10, 10, 12, 12, 12] if show_workspace else [25, 10, 10, 10, 12, 12, 12]
+        )
         separator = "─" * (sum(widths) + len(widths) - 1)
         lines.append("")
         lines.append("CPU-Only Compute Groups")
@@ -301,7 +306,9 @@ def _format_accurate_availability_table(availability, *, include_cpu: bool) -> N
 
     lines.append("")
     lines.append("💡 Legend:")
-    lines.append("  Available = platform-reported total minus used; negative values come from the platform API")
+    lines.append(
+        "  Available = platform-reported total minus used; negative values come from the platform API"
+    )
     if include_cpu:
         lines.append("  CPU rows   = CPU-only compute groups with CPU and memory totals")
     lines.append("")
@@ -326,7 +333,9 @@ def _list_accurate_resources(
     try:
         config = None
         try:
-            config, _ = Config.from_files_and_env(require_credentials=False, require_target_dir=False)
+            config, _ = Config.from_files_and_env(
+                require_credentials=False, require_target_dir=False
+            )
         except Exception:
             config = None
 
