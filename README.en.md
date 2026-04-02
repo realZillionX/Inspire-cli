@@ -64,15 +64,50 @@ password = "your_password"
 base_url = "https://qz.sii.edu.cn"
 ```
 
+## Built-in Proxy Configuration
+
+`Inspire-cli` can configure proxies per traffic type, so you do not have to rely solely on system-wide `HTTP_PROXY`. These settings usually belong in the global config at `~/.config/inspire/config.toml`.
+
+Recommended example:
+
+```toml
+[api]
+base_url = "https://qz.sii.edu.cn"
+force_proxy = true  # Only needed when system/no_proxy rules bypass the proxy
+
+[proxy]
+requests_http = "http://127.0.0.1:7897"
+requests_https = "http://127.0.0.1:7897"
+playwright = "http://127.0.0.1:7897"  # Optional; falls back to requests proxy when unset
+rtunnel = "http://127.0.0.1:7897"     # Optional; falls back to requests proxy when unset
+```
+
+| Setting | Used by | Environment override |
+| --- | --- | --- |
+| `[proxy].requests_http` / `[proxy].requests_https` | OpenAPI, Web Session, and normal `requests` traffic | `INSPIRE_REQUESTS_HTTP_PROXY` / `INSPIRE_REQUESTS_HTTPS_PROXY` |
+| `[proxy].playwright` | Playwright browser automation for login and page scraping | `INSPIRE_PLAYWRIGHT_PROXY` |
+| `[proxy].rtunnel` | `rtunnel` / `SSH ProxyCommand` used by `notebook ssh`, `bridge ssh`, and `bridge exec` | `INSPIRE_RTUNNEL_PROXY` |
+| `[api].force_proxy` | Forces OpenAPI requests to use the resolved proxy instead of being bypassed by `no_proxy` or system proxy rules | `INSPIRE_FORCE_PROXY` |
+
+Notes:
+
+- If `playwright` or `rtunnel` is unset, they fall back to the resolved `requests` proxy.
+- For a temporary test, export the env vars first, then use `inspire config show --compact` to inspect the effective values and sources.
+- To see the full env template including proxy variables, run `inspire config env --template full`.
+
 Project-level defaults such as base images, remote paths, and shared-directory conventions should live in the project's own `AGENTS.md`, not in this README.
 
 ## Common Environment Variables
 
-For the full list, run `inspire config env`.
+For the full list, run `inspire config env --template full`.
 
 | Variable | Description |
 | --- | --- |
 | `INSPIRE_USERNAME` | Platform username |
 | `INSPIRE_PASSWORD` | Platform password fallback |
 | `INSPIRE_BASE_URL` | API base URL |
+| `INSPIRE_REQUESTS_HTTP_PROXY` / `INSPIRE_REQUESTS_HTTPS_PROXY` | Proxy for `requests` / OpenAPI traffic |
+| `INSPIRE_PLAYWRIGHT_PROXY` | Proxy for Playwright automation |
+| `INSPIRE_RTUNNEL_PROXY` | Proxy for `rtunnel` / `SSH ProxyCommand` |
+| `INSPIRE_FORCE_PROXY` | Force OpenAPI to use the resolved proxy |
 | `INSPIRE_GLOBAL_CONFIG_PATH` | Override path for the global config file |

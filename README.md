@@ -64,15 +64,50 @@ password = "your_password"
 base_url = "https://qz.sii.edu.cn"
 ```
 
+## 内置代理配置
+
+`Inspire-cli` 本身支持按流量类型分别配置代理，不必强依赖系统级 `HTTP_PROXY`。这类设置通常应该写在全局配置 `~/.config/inspire/config.toml`。
+
+推荐示例：
+
+```toml
+[api]
+base_url = "https://qz.sii.edu.cn"
+force_proxy = true  # 仅在 system/no_proxy 绕过代理时需要
+
+[proxy]
+requests_http = "http://127.0.0.1:7897"
+requests_https = "http://127.0.0.1:7897"
+playwright = "http://127.0.0.1:7897"  # 可省略；未设置时回退到 requests 代理
+rtunnel = "http://127.0.0.1:7897"     # 可省略；未设置时回退到 requests 代理
+```
+
+| 配置项 | 作用范围 | 对应环境变量 |
+| --- | --- | --- |
+| `[proxy].requests_http` / `[proxy].requests_https` | OpenAPI、Web Session、普通 `requests` 流量 | `INSPIRE_REQUESTS_HTTP_PROXY` / `INSPIRE_REQUESTS_HTTPS_PROXY` |
+| `[proxy].playwright` | Playwright 浏览器自动化登录、页面抓取 | `INSPIRE_PLAYWRIGHT_PROXY` |
+| `[proxy].rtunnel` | `notebook ssh`、`bridge ssh`、`bridge exec` 的 `rtunnel` / `SSH ProxyCommand` | `INSPIRE_RTUNNEL_PROXY` |
+| `[api].force_proxy` | 对 OpenAPI 请求强制启用已解析出的代理，避免被 `no_proxy` 或系统代理规则绕过 | `INSPIRE_FORCE_PROXY` |
+
+补充说明：
+
+- 若 `playwright` 或 `rtunnel` 没单独设置，默认会回退到 `requests` 代理。
+- 若只想临时验证，先 `export` 对应环境变量即可；再用 `inspire config show --compact` 查看最终生效值和来源。
+- 想看包含代理项在内的完整环境变量模板，请运行 `inspire config env --template full`。
+
 项目级默认镜像、远端路径和共享目录约定，建议写在项目自己的 `AGENTS.md`，不要继续堆在 README 里。
 
 ## 常用环境变量
 
-更完整的列表请运行 `inspire config env`。
+更完整的列表请运行 `inspire config env --template full`。
 
 | 变量 | 说明 |
 | --- | --- |
 | `INSPIRE_USERNAME` | 平台用户名 |
 | `INSPIRE_PASSWORD` | 平台密码兜底 |
 | `INSPIRE_BASE_URL` | API 基地址 |
+| `INSPIRE_REQUESTS_HTTP_PROXY` / `INSPIRE_REQUESTS_HTTPS_PROXY` | `requests` / OpenAPI 代理 |
+| `INSPIRE_PLAYWRIGHT_PROXY` | Playwright 代理 |
+| `INSPIRE_RTUNNEL_PROXY` | `rtunnel` / `SSH ProxyCommand` 代理 |
+| `INSPIRE_FORCE_PROXY` | 强制 OpenAPI 使用已解析出的代理 |
 | `INSPIRE_GLOBAL_CONFIG_PATH` | 全局配置文件路径覆盖 |
