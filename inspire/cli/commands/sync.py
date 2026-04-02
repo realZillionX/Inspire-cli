@@ -1,15 +1,12 @@
-"""Sync command - Sync code on Bridge (with optional git push).
+"""Sync command - Sync code on Bridge over the SSH tunnel.
 
 Usage:
-    inspire sync [--remote <remote>] [--transport <ssh|workflow>]
+    inspire sync [--remote <remote>]
 
 This command:
-1. Syncs code on Bridge via selected transport
+1. Syncs code on Bridge via the SSH tunnel
 2. Optionally pushes the current branch to the remote (disabled by default)
 3. Returns the synced commit SHA
-
-SSH tunnel is the preferred transport. Workflow transport is retained as a
-fallback and is expected to be deprecated in the future.
 
 If the git remote is unreachable, use 'inspire bridge scp' to transfer
 files directly.
@@ -17,8 +14,8 @@ files directly.
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
-import re
 import subprocess
 import sys
 from typing import Optional
@@ -32,31 +29,29 @@ from inspire.cli.context import (
     EXIT_GENERAL_ERROR,
     EXIT_SUCCESS,
 )
+from inspire.cli.utils.common import json_option
+from inspire.cli.utils.notebook_cli import resolve_json_output
 from inspire.config import Config, ConfigError
-from inspire.bridge.forge import (
-    ForgeAuthError,
-    ForgeError,
-    GiteaAuthError,
-    GiteaError,
-    _get_active_repo,
-    create_forge_client,
-    trigger_sync_workflow,
-    wait_for_workflow_completion,
-)
 from inspire.bridge.tunnel import (
     BridgeProfile,
     TunnelConfig,
     is_tunnel_available,
     load_tunnel_config,
+    save_tunnel_config,
     sync_via_ssh,
     sync_via_ssh_bundle,
 )
 from inspire.cli.utils.output import (
-    emit_error as emit_output_error,
-    emit_success as emit_output_success,
+    emit_error,
+    emit_info,
+    emit_progress,
+    emit_success,
+    emit_warning,
 )
 
 logger = logging.getLogger(__name__)
+
+_SYNC_BRIDGE_PROBE_TIMEOUT = 2
 
 
 def get_current_branch() -> str:
@@ -136,74 +131,16 @@ def push_to_remote(branch: str, remote: str, *, show_progress: bool = False) -> 
         raise click.ClickException(f"Failed to push to {remote}: {error_msg}")
 
 
-def _preflight_workflow_transport(config: Config) -> None:
-    """Validate workflow transport configuration without triggering side effects."""
-    repo = _get_active_repo(config)
-    client = create_forge_client(config)
-    runs_url = f"{client.get_api_base(repo)}/runs?{client.get_pagination_params(1, 1)}"
-    client.request_json("GET", runs_url)
-
-
-def _is_cpu_bridge_name(name: str) -> bool:
-    """Best-effort CPU bridge detection from profile name."""
-    normalized = re.sub(r"[^a-z0-9]+", " ", name.lower())
-    return "cpu" in normalized.split()
-
-
-def _ordered_bridges_for_sync(
-    tunnel_config: TunnelConfig,
-    *,
-    source: str = "bundle",
-) -> list[BridgeProfile]:
-    """Return all configured bridges ordered for sync preference.
-
-    Priority:
-    - source=remote:
-      1) internet + CPU
-      2) internet + non-CPU
-      3) no-internet + CPU
-      4) no-internet + non-CPU
-
-    - source=bundle:
-      1) no-internet + CPU
-      2) no-internet + non-CPU
-      3) internet + CPU
-      4) internet + non-CPU
-    """
+def _ordered_bridges_for_sync(tunnel_config: TunnelConfig) -> list[BridgeProfile]:
+    """Return configured bridges with the default bridge first, then config order."""
     bridges = tunnel_config.list_bridges()
     if not bridges:
         return []
 
     default_bridge = tunnel_config.default_bridge
-    source = source.lower().strip()
-    prefer_internet = source != "bundle"
-
-    def _source_priority(bridge: BridgeProfile) -> int:
-        is_cpu = _is_cpu_bridge_name(bridge.name)
-        if prefer_internet:
-            if bridge.has_internet and is_cpu:
-                return 0
-            if bridge.has_internet:
-                return 1
-            if is_cpu:
-                return 2
-            return 3
-
-        if (not bridge.has_internet) and is_cpu:
-            return 0
-        if not bridge.has_internet:
-            return 1
-        if is_cpu:
-            return 2
-        return 3
-
-    # Stable sort keeps insertion order among same-priority non-default bridges.
     return sorted(
         bridges,
-        key=lambda bridge: (
-            _source_priority(bridge),
-            0 if bridge.name == default_bridge else 1,
-        ),
+        key=lambda bridge: (0 if bridge.name == default_bridge else 1),
     )
 
 
@@ -218,6 +155,52 @@ def _effective_push_mode(
     if push_mode:
         return push_mode
     return "skip"
+
+
+def _probe_live_bridges(
+    *,
+    tunnel_config: TunnelConfig,
+    config: Config,
+    candidate_bridges: list[BridgeProfile],
+) -> tuple[list[BridgeProfile], list[str]]:
+    """Probe all candidate bridges in parallel and return the live subset in order."""
+    tried_bridges = [bridge.name for bridge in candidate_bridges]
+    if not candidate_bridges:
+        return [], tried_bridges
+
+    def _probe(bridge: BridgeProfile) -> bool:
+        return is_tunnel_available(
+            bridge_name=bridge.name,
+            config=tunnel_config,
+            retries=0,
+            retry_pause=0.0,
+            progressive=False,
+            probe_timeout=_SYNC_BRIDGE_PROBE_TIMEOUT,
+        )
+
+    live_by_name: dict[str, bool] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(candidate_bridges)) as pool:
+        future_map = {pool.submit(_probe, bridge): bridge.name for bridge in candidate_bridges}
+        for future in concurrent.futures.as_completed(future_map):
+            bridge_name = future_map[future]
+            try:
+                live_by_name[bridge_name] = future.result()
+            except Exception:
+                live_by_name[bridge_name] = False
+
+    live_bridges = [bridge for bridge in candidate_bridges if live_by_name.get(bridge.name, False)]
+    return live_bridges, tried_bridges
+
+
+def _eligible_live_bridges(
+    *,
+    source: str,
+    live_bridges: list[BridgeProfile],
+) -> list[BridgeProfile]:
+    """Return live bridges eligible for the requested sync source."""
+    if source == "remote":
+        return [bridge for bridge in live_bridges if bridge.has_internet]
+    return list(live_bridges)
 
 
 def _is_locale_warning(line: str) -> bool:
@@ -283,6 +266,12 @@ def _summarize_sync_failure(
     return first_line, None, normalized
 
 
+def _is_sync_timeout_error(raw_error: object) -> bool:
+    """Return True when sync failure text indicates a timeout."""
+    normalized = _normalize_sync_error(raw_error).lower()
+    return "timed out after" in normalized
+
+
 def sync_via_tunnel(
     ctx: Context,
     config: Config,
@@ -295,38 +284,80 @@ def sync_via_tunnel(
     force: bool = False,
     offline_bundle: bool = False,
     bridge_name: Optional[str] = None,
+    fallback_bridge_names: Optional[list[str]] = None,
     tunnel_config=None,
 ) -> int:
     """Sync code via SSH tunnel (fast path)."""
-    if ctx.debug and not ctx.json_output:
-        if bridge_name:
-            click.echo(f"Syncing via SSH tunnel (bridge: {bridge_name})...")
-        else:
-            click.echo("Syncing via SSH tunnel...")
+    initial_bridge_name = bridge_name
+    bridge_sequence = [initial_bridge_name] if initial_bridge_name else [None]
+    if fallback_bridge_names:
+        bridge_sequence.extend(fallback_bridge_names)
 
-    if offline_bundle:
-        result = sync_via_ssh_bundle(
-            target_dir=config.target_dir,
-            branch=branch,
-            commit_sha=commit_sha,
-            force=force,
-            bridge_name=bridge_name,
-            config=tunnel_config,
-            timeout=timeout,
-        )
-    else:
-        result = sync_via_ssh(
-            target_dir=config.target_dir,
-            branch=branch,
-            commit_sha=commit_sha,
-            remote=remote,
-            force=force,
-            bridge_name=bridge_name,
-            config=tunnel_config,
-            timeout=timeout,
-        )
+    result: dict[str, object] = {"success": False, "synced_sha": None, "error": "Unknown error"}
+    last_bridge_name = bridge_sequence[0]
+
+    for index, current_bridge_name in enumerate(bridge_sequence):
+        last_bridge_name = current_bridge_name
+        if ctx.debug and not ctx.json_output:
+            if current_bridge_name:
+                emit_progress(ctx, f"Syncing via SSH tunnel (bridge: {current_bridge_name})...")
+            else:
+                emit_progress(ctx, "Syncing via SSH tunnel...")
+
+        if offline_bundle:
+            result = sync_via_ssh_bundle(
+                target_dir=config.target_dir,
+                branch=branch,
+                commit_sha=commit_sha,
+                force=force,
+                bridge_name=current_bridge_name,
+                config=tunnel_config,
+                timeout=timeout,
+            )
+        else:
+            result = sync_via_ssh(
+                target_dir=config.target_dir,
+                branch=branch,
+                commit_sha=commit_sha,
+                remote=remote,
+                force=force,
+                bridge_name=current_bridge_name,
+                config=tunnel_config,
+                timeout=timeout,
+            )
+
+        if result.get("success"):
+            break
+
+        has_next_bridge = index < len(bridge_sequence) - 1
+        if not has_next_bridge or not _is_sync_timeout_error(result.get("error")):
+            break
+
+        next_bridge_name = bridge_sequence[index + 1]
+        if not ctx.json_output:
+            from_bridge = current_bridge_name or "<default>"
+            to_bridge = next_bridge_name or "<default>"
+            emit_warning(
+                ctx,
+                f"sync timed out on bridge '{from_bridge}'; retrying with '{to_bridge}'.",
+            )
 
     if result.get("success"):
+        if (
+            last_bridge_name
+            and tunnel_config is not None
+            and last_bridge_name != initial_bridge_name
+            and tunnel_config.default_bridge != last_bridge_name
+        ):
+            tunnel_config.default_bridge = last_bridge_name
+            try:
+                save_tunnel_config(tunnel_config)
+            except Exception as e:
+                if not ctx.json_output:
+                    emit_warning(
+                        ctx,
+                        f"sync succeeded but failed to persist updated default bridge '{last_bridge_name}': {e}",
+                    )
         synced_sha = result.get("synced_sha") or commit_sha[:7]
         bundle_mode = result.get("bundle_mode") if offline_bundle else None
         bundle_base_sha = result.get("bundle_base_sha") if offline_bundle else None
@@ -341,24 +372,25 @@ def sync_via_tunnel(
             "message": commit_msg,
             "target_dir": config.target_dir,
         }
+        if last_bridge_name:
+            payload["bridge_name"] = last_bridge_name
         if bundle_mode:
             payload["bundle_mode"] = bundle_mode
         if bundle_base_sha:
             payload["bundle_base_sha"] = bundle_base_sha
 
         if ctx.debug and not ctx.json_output:
-            click.echo(
-                click.style("OK", fg="green")
-                + f" Synced branch '{branch}' ({synced_sha[:7]}) to {config.target_dir}"
-            )
-            click.echo(f"  Commit: {commit_msg}")
+            emit_info(ctx, f"Synced branch '{branch}' ({synced_sha[:7]}) to {config.target_dir}")
+            emit_info(ctx, f"  Commit: {commit_msg}")
+            if last_bridge_name:
+                emit_info(ctx, f"  Bridge: {last_bridge_name}")
             if offline_bundle:
                 mode_suffix = f", {bundle_mode}" if bundle_mode else ""
-                click.echo(f"  Method: SSH tunnel (offline bundle{mode_suffix})")
+                emit_info(ctx, f"  Method: SSH tunnel (offline bundle{mode_suffix})")
             else:
-                click.echo("  Method: SSH tunnel (fast)")
+                emit_info(ctx, "  Method: SSH tunnel (fast)")
         else:
-            emit_output_success(
+            emit_success(
                 ctx,
                 payload=payload,
                 text=f"synced {synced_sha[:7]} via {'ssh-bundle' if offline_bundle else 'ssh'}",
@@ -371,134 +403,18 @@ def sync_via_tunnel(
         remote=remote,
     )
 
-    human_lines = [f"Sync failed: {message}"]
-    if hint:
-        human_lines.append(f"Hint: {hint}")
+    human_lines: list[str] = []
     if ctx.debug and details and details != message:
-        human_lines.append("Details:")
-        human_lines.append(details)
-    emit_output_error(
+        human_lines.extend(["Details:", details])
+    emit_error(
         ctx,
         error_type="SyncError",
-        message=message,
+        message=f"Sync failed: {message}",
         exit_code=EXIT_GENERAL_ERROR,
         hint=hint,
-        human_lines=human_lines,
+        human_lines=human_lines if human_lines else None,
     )
     return EXIT_GENERAL_ERROR
-
-
-def sync_via_workflow(
-    ctx: Context,
-    config: Config,
-    *,
-    branch: str,
-    commit_sha: str,
-    commit_msg: str,
-    remote: str,
-    wait: bool,
-    timeout: int,
-) -> int:
-    """Sync code via fallback Git Actions workflow transport."""
-    if ctx.debug and not ctx.json_output:
-        click.echo("Triggering fallback sync workflow...")
-
-    try:
-        run_id = trigger_sync_workflow(config, branch, commit_sha)
-    except (ForgeError, ForgeAuthError, GiteaError, GiteaAuthError) as e:
-        emit_output_error(
-            ctx,
-            error_type="GiteaError",
-            message=str(e),
-            exit_code=EXIT_CONFIG_ERROR,
-            human_lines=[f"Error: {e}"],
-        )
-        return EXIT_CONFIG_ERROR
-
-    if wait and run_id:
-        if ctx.debug and not ctx.json_output:
-            click.echo("Waiting for sync to complete...")
-
-        try:
-            result = wait_for_workflow_completion(config, run_id, timeout)
-        except TimeoutError:
-            emit_output_error(
-                ctx,
-                error_type="Timeout",
-                message=f"Sync workflow did not complete within {timeout}s",
-                exit_code=EXIT_GENERAL_ERROR,
-                hint="Check Gitea for sync workflow status.",
-                human_lines=[
-                    f"Sync workflow timed out after {timeout}s",
-                    "The sync may still complete. Check Gitea for status.",
-                ],
-            )
-            return EXIT_GENERAL_ERROR
-
-        if result.get("conclusion") == "success":
-            if ctx.debug and not ctx.json_output:
-                click.echo(
-                    click.style("OK", fg="green")
-                    + f" Synced branch '{branch}' ({commit_sha[:7]}) to {config.target_dir}"
-                )
-                click.echo(f"  Commit: {commit_msg}")
-                click.echo(f"  Remote: {remote}")
-            else:
-                emit_output_success(
-                    ctx,
-                    payload={
-                        "status": "success",
-                        "method": "gitea_actions",
-                        "branch": branch,
-                        "remote": remote,
-                        "commit": commit_sha[:7],
-                        "commit_full": commit_sha,
-                        "message": commit_msg,
-                        "target_dir": config.target_dir,
-                        "html_url": result.get("html_url", ""),
-                    },
-                    text=f"synced {commit_sha[:7]} via workflow",
-                )
-            return EXIT_SUCCESS
-
-        hint = result.get("html_url") or None
-        human_lines = [f"Sync failed: {result.get('conclusion', 'unknown')}"]
-        if result.get("html_url"):
-            human_lines.append(f"  See: {result['html_url']}")
-        emit_output_error(
-            ctx,
-            error_type="SyncError",
-            message=f"Sync failed: {result.get('conclusion', 'unknown')}",
-            exit_code=EXIT_GENERAL_ERROR,
-            hint=hint,
-            human_lines=human_lines,
-        )
-        return EXIT_GENERAL_ERROR
-
-    if ctx.debug and not ctx.json_output:
-        click.echo(click.style("OK", fg="green") + f" Pushed {branch} to {remote}")
-        click.echo(
-            click.style("OK", fg="green")
-            + " Triggered sync workflow"
-            + (f" (run {run_id})" if run_id else "")
-        )
-        click.echo(f"  Commit: {commit_sha[:7]} - {commit_msg}")
-    else:
-        emit_output_success(
-            ctx,
-            payload={
-                "status": "triggered",
-                "method": "gitea_actions",
-                "branch": branch,
-                "remote": remote,
-                "commit": commit_sha[:7],
-                "commit_full": commit_sha,
-                "run_id": run_id,
-            },
-            text="triggered sync workflow" + (f" (run {run_id})" if run_id else ""),
-        )
-
-    return EXIT_SUCCESS
 
 
 @click.command()
@@ -522,25 +438,13 @@ def sync_via_workflow(
     "--force",
     is_flag=True,
     help=(
-        "Force sync mode: imply --allow-dirty, " "and hard-reset diverged Bridge branch on SSH sync"
+        "Force sync mode: imply --allow-dirty, and hard-reset diverged Bridge branch on SSH sync"
     ),
-)
-@click.option(
-    "--wait/--no-wait",
-    default=True,
-    help="Wait for sync to complete (default: wait)",
 )
 @click.option(
     "--timeout",
     default=120,
     help="Timeout in seconds when waiting for sync (default: 120)",
-)
-@click.option(
-    "--transport",
-    type=click.Choice(["ssh", "workflow"], case_sensitive=False),
-    default="ssh",
-    show_default=True,
-    help="Sync transport to use (SSH preferred; workflow is fallback-only, no automatic fallback)",
 )
 @click.option(
     "--source",
@@ -555,6 +459,7 @@ def sync_via_workflow(
     default=None,
     help="Git push policy before sync (default: skip; use required/best-effort to enable push)",
 )
+@json_option
 @pass_context
 def sync(
     ctx: Context,
@@ -562,23 +467,22 @@ def sync(
     no_push: bool,
     allow_dirty: bool,
     force: bool,
-    wait: bool,
     timeout: int,
-    transport: str,
     source: str,
     push_mode: Optional[str],
+    json_output: bool = False,
 ) -> None:
+    json_output = resolve_json_output(ctx, json_output)
     """Sync local code to the Bridge shared filesystem.
 
-    This command syncs to Bridge using the selected transport.
+    This command syncs to Bridge over the SSH tunnel.
     Git push is skipped by default unless --push-mode is set:
-    - ssh: direct SSH tunnel sync (default; preferred; source is controlled by --source)
-    - workflow: fallback Git Actions workflow sync (planned for future deprecation)
+    - remote: fetch from the git remote over the selected live bridge
+    - bundle: upload a local git bundle over the selected live bridge (default)
 
     \b
     Examples:
         inspire sync                          # Sync current branch via SSH tunnel
-        inspire sync --transport workflow     # Use fallback workflow transport
         inspire sync --remote upstream        # Sync via upstream remote
         inspire sync --source bundle          # Force local bundle sync over SSH
         inspire sync --push-mode required     # Push before sync (fail if push fails)
@@ -596,12 +500,11 @@ def sync(
     try:
         config, _ = Config.from_files_and_env(require_target_dir=True, require_credentials=False)
     except ConfigError as e:
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="ConfigError",
-            message=str(e),
+            message=f"Configuration error: {e}",
             exit_code=EXIT_CONFIG_ERROR,
-            human_lines=[f"Configuration error: {e}"],
         )
         sys.exit(EXIT_CONFIG_ERROR)
 
@@ -612,37 +515,15 @@ def sync(
     if remote is None:
         remote = config.default_remote
 
-    transport = transport.lower().strip()
     source = source.lower().strip()
     push_mode = push_mode.lower().strip() if push_mode else None
 
-    if transport == "workflow" and source == "remote":
-        emit_output_error(
-            ctx,
-            error_type="ValidationError",
-            message="--source remote is only supported with '--transport ssh'",
-            exit_code=EXIT_CONFIG_ERROR,
-            human_lines=["Error: --source remote is only supported with '--transport ssh'."],
-        )
-        sys.exit(EXIT_CONFIG_ERROR)
-
-    if transport == "workflow" and force:
-        emit_output_error(
-            ctx,
-            error_type="ValidationError",
-            message="--force is only supported with '--transport ssh'",
-            exit_code=EXIT_CONFIG_ERROR,
-            human_lines=["Error: --force is only supported with '--transport ssh'."],
-        )
-        sys.exit(EXIT_CONFIG_ERROR)
-
     if no_push and push_mode and push_mode != "skip":
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="ValidationError",
             message="--no-push conflicts with --push-mode values other than 'skip'",
             exit_code=EXIT_CONFIG_ERROR,
-            human_lines=["Error: --no-push conflicts with --push-mode values other than 'skip'."],
         )
         sys.exit(EXIT_CONFIG_ERROR)
 
@@ -650,103 +531,56 @@ def sync(
     selected_bridge = None
     use_offline_bundle = False
     candidate_bridges: list[BridgeProfile] = []
-    if transport == "ssh":
-        tunnel_config = load_tunnel_config()
-        candidate_bridges = _ordered_bridges_for_sync(tunnel_config, source=source)
-        if not candidate_bridges:
-            hint = "Use 'inspire tunnel list' or 'inspire notebook ssh <id>' first."
-            emit_output_error(
-                ctx,
-                error_type="TunnelUnavailable",
-                message="No bridge configured for SSH sync",
-                exit_code=EXIT_CONFIG_ERROR,
-                hint=hint,
-                human_lines=["Error: No bridge configured for SSH sync.", f"Hint: {hint}"],
-            )
-            sys.exit(EXIT_CONFIG_ERROR)
+    fallback_bridge_names: list[str] = []
+    tunnel_config = load_tunnel_config()
+    candidate_bridges = _ordered_bridges_for_sync(tunnel_config)
+    if not candidate_bridges:
+        emit_error(
+            ctx,
+            error_type="TunnelUnavailable",
+            message="No bridge configured for SSH sync",
+            exit_code=EXIT_CONFIG_ERROR,
+            hint="Use 'inspire tunnel list' or 'inspire notebook ssh <id>' first.",
+        )
+        sys.exit(EXIT_CONFIG_ERROR)
 
-        tried_bridges: list[str] = []
-        for bridge in candidate_bridges:
-            tried_bridges.append(bridge.name)
-            if is_tunnel_available(
-                bridge_name=bridge.name,
-                config=tunnel_config,
-                retries=config.tunnel_retries,
-                retry_pause=config.tunnel_retry_pause,
-            ):
-                selected_bridge = bridge
-                break
+    live_bridges, tried_bridges = _probe_live_bridges(
+        tunnel_config=tunnel_config,
+        config=config,
+        candidate_bridges=candidate_bridges,
+    )
+    if not live_bridges:
+        tried_csv = ", ".join(tried_bridges)
+        emit_error(
+            ctx,
+            error_type="TunnelUnavailable",
+            message=f"SSH tunnel is not available for any configured bridge (tried: {tried_csv})",
+            exit_code=EXIT_GENERAL_ERROR,
+            hint="Run 'inspire tunnel status' to troubleshoot the tunnel.",
+        )
+        sys.exit(EXIT_GENERAL_ERROR)
 
-        if not selected_bridge:
-            tried_csv = ", ".join(tried_bridges)
-            hint = "Run 'inspire tunnel status' or use fallback '--transport workflow'."
-            emit_output_error(
-                ctx,
-                error_type="TunnelUnavailable",
-                message=(
-                    "SSH tunnel is not available for any configured bridge " f"(tried: {tried_csv})"
-                ),
-                exit_code=EXIT_GENERAL_ERROR,
-                hint=hint,
-                human_lines=[
-                    (
-                        "Error: SSH tunnel is not available for any configured bridge "
-                        f"(tried: {tried_csv})."
-                    ),
-                    f"Hint: {hint}",
-                ],
-            )
-            sys.exit(EXIT_GENERAL_ERROR)
+    eligible_bridges = _eligible_live_bridges(source=source, live_bridges=live_bridges)
+    if not eligible_bridges and source == "remote":
+        first_live = live_bridges[0]
+        emit_error(
+            ctx,
+            error_type="ValidationError",
+            message=f"Bridge '{first_live.name}' has no internet; remote source is unavailable",
+            exit_code=EXIT_CONFIG_ERROR,
+            hint="Use '--source bundle' for no-internet bridges.",
+        )
+        sys.exit(EXIT_CONFIG_ERROR)
 
-        if source == "remote" and not selected_bridge.has_internet:
-            hint = "Use '--source bundle' for no-internet bridges."
-            emit_output_error(
-                ctx,
-                error_type="ValidationError",
-                message=(
-                    f"Bridge '{selected_bridge.name}' has no internet; "
-                    "remote source is unavailable"
-                ),
-                exit_code=EXIT_CONFIG_ERROR,
-                hint=hint,
-                human_lines=[
-                    (
-                        f"Error: Bridge '{selected_bridge.name}' has no internet; "
-                        "remote source is unavailable."
-                    ),
-                    f"Hint: {hint}",
-                ],
-            )
-            sys.exit(EXIT_CONFIG_ERROR)
-
-        use_offline_bundle = source == "bundle"
-        if ctx.debug and not ctx.json_output:
-            has_cpu_candidate = any(
-                _is_cpu_bridge_name(bridge.name) for bridge in candidate_bridges
-            )
-            if _is_cpu_bridge_name(selected_bridge.name):
-                click.echo(f"Using CPU bridge '{selected_bridge.name}' for sync.")
-            elif has_cpu_candidate:
-                click.echo(
-                    f"CPU bridge unavailable, using '{selected_bridge.name}' for sync.",
-                    err=True,
-                )
-            if use_offline_bundle:
-                click.echo("Using offline bundle sync path (--source bundle).", err=True)
-            elif source == "remote":
-                click.echo("Using remote git sync path (--source remote).")
-    else:
-        try:
-            _preflight_workflow_transport(config)
-        except (ForgeError, ForgeAuthError, ConfigError) as e:
-            emit_output_error(
-                ctx,
-                error_type="ConfigError",
-                message=str(e),
-                exit_code=EXIT_CONFIG_ERROR,
-                human_lines=[f"Configuration error: {e}"],
-            )
-            sys.exit(EXIT_CONFIG_ERROR)
+    selected_bridge = eligible_bridges[0]
+    fallback_bridge_names = [bridge.name for bridge in eligible_bridges[1:]]
+    use_offline_bundle = source == "bundle"
+    if ctx.debug and not ctx.json_output:
+        emit_info(ctx, f"Using bridge '{selected_bridge.name}' for sync.")
+        if use_offline_bundle:
+            emit_info(ctx, "Using offline bundle sync path (--source bundle).")
+        else:
+            emit_info(ctx, "Using remote git sync path (--source remote).")
 
     # Check for uncommitted changes
     if has_uncommitted_changes():
@@ -756,21 +590,20 @@ def sync(
                 "Use --force only when you also want force-sync behavior "
                 "(implies --allow-dirty and may overwrite a diverged Bridge branch)."
             )
-            emit_output_error(
+            emit_error(
                 ctx,
                 error_type="ValidationError",
                 message="Uncommitted changes detected",
                 exit_code=EXIT_GENERAL_ERROR,
                 hint=hint,
-                human_lines=["Error: Uncommitted changes detected.", f"Hint: {hint}"],
             )
             sys.exit(EXIT_GENERAL_ERROR)
 
         dirty_override_flag = "--allow-dirty" if allow_dirty else "--force"
         if not ctx.json_output:
-            click.echo(
-                f"Warning: Uncommitted changes detected; syncing committed tip of '{branch}' only ({dirty_override_flag}).",
-                err=True,
+            emit_warning(
+                ctx,
+                f"Uncommitted changes detected; syncing committed tip of '{branch}' only ({dirty_override_flag}).",
             )
 
     commit_sha = get_current_commit_sha(branch)
@@ -786,13 +619,13 @@ def sync(
         except click.ClickException as e:
             if effective_push_mode == "best-effort":
                 if not ctx.json_output:
-                    click.echo(
-                        f"Warning: {e}. Continuing because push mode is best-effort.",
-                        err=True,
+                    emit_warning(
+                        ctx,
+                        f"{e}. Continuing because push mode is best-effort.",
                     )
             else:
                 if ctx.json_output:
-                    emit_output_error(
+                    emit_error(
                         ctx,
                         error_type="GitError",
                         message=str(e),
@@ -801,32 +634,20 @@ def sync(
                     sys.exit(EXIT_GENERAL_ERROR)
                 raise
     elif ctx.debug and not ctx.json_output:
-        click.echo("Skipping git push before sync.")
+        emit_info(ctx, "Skipping git push before sync.")
 
-    if transport == "ssh":
-        exit_code = sync_via_tunnel(
-            ctx,
-            config,
-            branch=branch,
-            commit_sha=commit_sha,
-            commit_msg=commit_msg,
-            remote=remote,
-            timeout=timeout,
-            force=force,
-            offline_bundle=use_offline_bundle,
-            bridge_name=selected_bridge.name,
-            tunnel_config=tunnel_config,
-        )
-        sys.exit(exit_code)
-
-    exit_code = sync_via_workflow(
+    exit_code = sync_via_tunnel(
         ctx,
         config,
         branch=branch,
         commit_sha=commit_sha,
         commit_msg=commit_msg,
         remote=remote,
-        wait=wait,
         timeout=timeout,
+        force=force,
+        offline_bundle=use_offline_bundle,
+        bridge_name=selected_bridge.name,
+        fallback_bridge_names=fallback_bridge_names,
+        tunnel_config=tunnel_config,
     )
     sys.exit(exit_code)

@@ -17,6 +17,10 @@ from inspire.platform.web.browser_api.core import (
 from inspire.platform.web.session import WebSession, get_web_session
 from inspire.platform.web.browser_api.rtunnel.logging import trace_event, update_trace_summary
 
+import logging
+
+_log = logging.getLogger("inspire.platform.web.browser_api.playwright_notebooks")
+
 
 # ---------------------------------------------------------------------------
 # Jupyter navigation
@@ -241,8 +245,6 @@ def _run_command_in_notebook_sync(
     completion_marker: str | None = None,
 ) -> bool:
     """Sync implementation for run_command_in_notebook."""
-    import sys as _sys
-
     from playwright.sync_api import sync_playwright
 
     from inspire.platform.web.browser_api.rtunnel import (
@@ -253,8 +255,7 @@ def _run_command_in_notebook_sync(
     if session is None:
         session = get_web_session()
 
-    _sys.stderr.write("Running command in notebook terminal...\n")
-    _sys.stderr.flush()
+    _log.info("Running command in notebook terminal...")
 
     with sync_playwright() as p:
         browser = _launch_browser(p, headless=headless)

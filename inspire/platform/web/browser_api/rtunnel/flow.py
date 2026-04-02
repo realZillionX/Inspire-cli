@@ -87,21 +87,18 @@ class _StepTimer:
         """
         if not self._enabled:
             return 0.0
-        import sys as _sys
 
         now = time.monotonic()
         elapsed = now - self._last
         self._last = now
         self._steps.append((label, elapsed))
-        _sys.stderr.write(f"  [timing] {label}: {elapsed:.3f}s\n")
-        _sys.stderr.flush()
+        _log.debug("  [timing] %s: %.3fs", label, elapsed)
         return elapsed
 
     def summary(self) -> None:
         """Print a visual summary table to stderr."""
         if not self._enabled or not self._steps:
             return
-        import sys as _sys
 
         total = sum(s for _, s in self._steps)
         if total <= 0:
@@ -110,14 +107,14 @@ class _StepTimer:
         max_label = max(len(label) for label, _ in self._steps)
         bar_width = 30
 
-        _sys.stderr.write("\n  ── rtunnel timing summary ──\n")
+        lines = ["\n  ── rtunnel timing summary ──"]
         for label, elapsed in self._steps:
             pct = elapsed / total * 100
             bar_len = int(round(pct / 100 * bar_width))
             bar = "#" * bar_len
-            _sys.stderr.write(f"  {label:<{max_label}}  {elapsed:6.2f}s  {pct:5.1f}%  {bar}\n")
-        _sys.stderr.write(f"  {'TOTAL':<{max_label}}  {total:6.2f}s\n")
-        _sys.stderr.flush()
+            lines.append(f"  {label:<{max_label}}  {elapsed:6.2f}s  {pct:5.1f}%  {bar}")
+        lines.append(f"  {'TOTAL':<{max_label}}  {total:6.2f}s")
+        _log.info("\n".join(lines))
 
 
 def _derive_vscode_proxy_url(proxy_url: str) -> str | None:
@@ -183,8 +180,6 @@ def _send_rtunnel_setup_script(
     batch_cmd: str,
     timer: "_StepTimer",
 ) -> tuple[bool, list[str]]:
-    import sys as _sys
-
     detected_errors: list[str] = []
     ws_diagnostics: dict[str, Any] = {}
     setup_confirmed = False
@@ -209,8 +204,7 @@ def _send_rtunnel_setup_script(
         return setup_confirmed, detected_errors
 
     if setup_confirmed:
-        _sys.stderr.write("  Sent setup script via Jupyter terminal WebSocket.\n")
-        _sys.stderr.flush()
+        _log.debug("  Sent setup script via Jupyter terminal WebSocket.")
         timer.mark("open_terminal")
         timer.mark("focus_xterm")
         timer.mark("build_and_send_cmd")
@@ -231,16 +225,14 @@ def _send_rtunnel_setup_script(
             stdout_len=ws_diagnostics.get("stdoutLen"),
             elapsed=ws_diagnostics.get("elapsed"),
         )
-        _sys.stderr.write(
+        _log.warning(
             "  WebSocket terminal command was sent but completion was not confirmed; "
-            "continuing without browser replay.\n"
+            "continuing without browser replay."
         )
-        _sys.stderr.flush()
         update_trace_summary(setup_confirmed="false")
         return False, []
 
-    _sys.stderr.write("  WebSocket terminal setup unavailable, using browser automation.\n")
-    _sys.stderr.flush()
+    _log.info("  WebSocket terminal setup unavailable, using browser automation.")
     trace_event("terminal_setup_fallback", transport="browser_automation")
     update_trace_summary(terminal_transport="browser_automation")
 
@@ -272,16 +264,12 @@ def _send_rtunnel_setup_script(
                 )
                 if ws_listener_attached:
                     trace_event("terminal_ws_listener_attached", term_name=browser_term_name)
-                    _sys.stderr.write("  Attached WS output listener for marker detection.\n")
-                    _sys.stderr.flush()
+                    _log.debug("  Attached WS output listener for marker detection.")
             except (PlaywrightError, RuntimeError, TimeoutError, ValueError):
                 ws_listener_attached = False
                 trace_event("terminal_ws_listener_attach_failed", term_name=browser_term_name)
 
-        _sys.stderr.write(
-            f"  Executing setup script ({len(batch_cmd)} chars) in notebook terminal...\n"
-        )
-        _sys.stderr.flush()
+        _log.debug("  Executing setup script (%d chars) in notebook terminal...", len(batch_cmd))
         page.keyboard.insert_text(batch_cmd)
         page.keyboard.press("Enter")
         timer.mark("build_and_send_cmd")
@@ -400,8 +388,6 @@ def _setup_notebook_rtunnel_sync(
     timeout: int = 120,
 ) -> str:
     """Sync implementation for setup_notebook_rtunnel."""
-    import sys as _sys
-
     from playwright.sync_api import sync_playwright
 
     from inspire.platform.web.browser_api.playwright_notebooks import (
@@ -441,14 +427,12 @@ def _setup_notebook_rtunnel_sync(
                 proxy_probe_result="fast_path_reuse",
             )
             trace_event("fast_path_hit", proxy_url=existing)
-            _sys.stderr.write("Using existing rtunnel connection (fast path).\n")
-            _sys.stderr.flush()
+            _log.info("Using existing rtunnel connection (fast path).")
             return existing
 
         timer.mark("probe_existing")
         trace_event("fast_path_miss")
-        _sys.stderr.write("Setting up rtunnel tunnel via browser automation...\n")
-        _sys.stderr.flush()
+        _log.info("Setting up rtunnel tunnel via browser automation...")
 
         try:
             with sync_playwright() as p:

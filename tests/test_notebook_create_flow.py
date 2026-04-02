@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from inspire.cli.utils.notebook_post_start import NotebookPostStartSpec
 from inspire.cli.commands.notebook import notebook_create_flow as flow_module
 from inspire.cli.commands.notebook.notebook_create_flow import resolve_notebook_resource_spec_price
@@ -31,6 +33,7 @@ def test_cpu_resource_spec_keeps_requested_cpu_from_quota() -> None:
     ]
 
     spec, resolved_quota, resolved_cpu, resolved_mem = resolve_notebook_resource_spec_price(
+        Context(),
         resource_prices=resource_prices,
         gpu_count=0,
         selected_gpu_type="",
@@ -52,26 +55,35 @@ def test_cpu_resource_spec_keeps_requested_cpu_from_quota() -> None:
     assert spec["cpu_type"] == "cpu-type-small"
 
 
-def test_cpu_resource_spec_exists_without_resource_prices() -> None:
-    spec, resolved_quota, resolved_cpu, resolved_mem = resolve_notebook_resource_spec_price(
-        resource_prices=[],
-        gpu_count=0,
-        selected_gpu_type="",
-        gpu_pattern="CPU",
-        logic_compute_group_id="lcg-cpu",
-        quota_id="quota-4",
-        cpu_count=4,
-        memory_size=16,
-        requested_cpu_count=4,
-    )
+def test_cpu_resource_spec_fails_without_resource_prices(monkeypatch) -> None:  # noqa: ANN001
+    captured: dict[str, str] = {}
 
-    assert resolved_quota == "quota-4"
-    assert resolved_cpu == 4
-    assert resolved_mem == 16
-    assert spec["gpu_count"] == 0
-    assert spec["cpu_count"] == 4
-    assert spec["memory_size_gib"] == 16
-    assert spec["quota_id"] == "quota-4"
+    def fake_handle_error(
+        ctx, error_type, message, exit_code, *, hint=None
+    ):  # noqa: ANN001, ANN202
+        captured["error_type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(flow_module, "_handle_error", fake_handle_error)
+
+    with pytest.raises(SystemExit):
+        resolve_notebook_resource_spec_price(
+            Context(),
+            resource_prices=[],
+            gpu_count=0,
+            selected_gpu_type="",
+            gpu_pattern="CPU",
+            logic_compute_group_id="lcg-cpu",
+            quota_id="quota-4",
+            cpu_count=4,
+            memory_size=16,
+            requested_cpu_count=4,
+        )
+
+    assert captured["error_type"] == "ValidationError"
+    assert "No notebook CPU resource spec found for 4xCPU" in captured["message"]
 
 
 def test_gpu_resource_spec_prefers_matching_resource_prices() -> None:
@@ -95,6 +107,7 @@ def test_gpu_resource_spec_prefers_matching_resource_prices() -> None:
     ]
 
     spec, resolved_quota, resolved_cpu, resolved_mem = resolve_notebook_resource_spec_price(
+        Context(),
         resource_prices=resource_prices,
         gpu_count=1,
         selected_gpu_type="NVIDIA_H100",
@@ -114,6 +127,425 @@ def test_gpu_resource_spec_prefers_matching_resource_prices() -> None:
     assert spec["cpu_count"] == 20
     assert spec["memory_size_gib"] == 80
     assert spec["quota_id"] == "quota-h100"
+
+
+def test_resolve_notebook_compute_group_explicit_override_infers_gpu_type_from_resource_prices(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-4090-cuda128",
+                "name": "4090-cuda12.8",
+                "compute_group_name": "GPU4090资源组",
+                "gpu_type_stats": [],
+                "workspace_ids": ["ws-test"],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "get_resource_prices",
+        lambda workspace_id, logic_compute_group_id, session=None: [
+            {
+                "gpu_count": 1,
+                "cpu_count": 20,
+                "memory_size_gib": 80,
+                "quota_id": "quota-4090",
+                "gpu_info": {"gpu_type": "NVIDIA_RTX_4090"},
+            }
+        ],
+    )
+
+    result = flow_module.resolve_notebook_compute_group(
+        Context(),
+        session=SimpleNamespace(),
+        workspace_id="ws-test",
+        gpu_count=1,
+        gpu_pattern="4090",
+        requested_cpu_count=None,
+        auto=False,
+        json_output=True,
+        compute_group_name="4090-cuda12.8",
+    )
+
+    assert result == (
+        "lcg-4090-cuda128",
+        "NVIDIA_RTX_4090",
+        "4090",
+        "1x4090",
+        "4090-cuda12.8",
+    )
+
+
+def test_resolve_notebook_compute_group_explicit_override_requires_typed_gpu_resource(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    captured: dict[str, str] = {}
+
+    def fake_handle_error(
+        ctx, error_type, message, exit_code, *, hint=None
+    ):  # noqa: ANN001, ANN202
+        captured["error_type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(flow_module, "_handle_error", fake_handle_error)
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+
+    with pytest.raises(SystemExit):
+        flow_module.resolve_notebook_compute_group(
+            Context(),
+            session=SimpleNamespace(),
+            workspace_id="ws-test",
+            gpu_count=1,
+            gpu_pattern="GPU",
+            requested_cpu_count=None,
+            auto=True,
+            json_output=True,
+            compute_group_name="4090-cuda12.8",
+        )
+
+    assert captured["error_type"] == "ValidationError"
+    assert captured["message"] == "Explicit --compute-group requires a typed GPU resource"
+    assert "1xH200" in captured["hint"]
+
+
+def test_resolve_notebook_compute_group_explicit_override_fails_on_gpu_mismatch(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    captured: dict[str, str] = {}
+
+    def fake_handle_error(
+        ctx, error_type, message, exit_code, *, hint=None
+    ):  # noqa: ANN001, ANN202
+        captured["error_type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(flow_module, "_handle_error", fake_handle_error)
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-h100-cuda128",
+                "name": "h100-cuda12.8",
+                "compute_group_name": "GPUH100资源组",
+                "workspace_ids": ["ws-test"],
+                "gpu_type_stats": [
+                    {
+                        "gpu_info": {
+                            "gpu_type": "NVIDIA_H100",
+                            "gpu_type_display": "H100",
+                        }
+                    }
+                ],
+            }
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        flow_module.resolve_notebook_compute_group(
+            Context(),
+            session=SimpleNamespace(),
+            workspace_id="ws-test",
+            gpu_count=1,
+            gpu_pattern="4090",
+            requested_cpu_count=None,
+            auto=True,
+            json_output=True,
+            compute_group_name="h100-cuda12.8",
+        )
+
+    assert captured["error_type"] == "ValidationError"
+    assert "does not match requested GPU resource '1x4090'" in captured["message"]
+
+
+def test_resolve_notebook_compute_group_explicit_override_requires_workspace_binding(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    captured: dict[str, str] = {}
+
+    def fake_handle_error(
+        ctx, error_type, message, exit_code, *, hint=None
+    ):  # noqa: ANN001, ANN202
+        captured["error_type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(flow_module, "_handle_error", fake_handle_error)
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-cpu",
+                "name": "CPU资源",
+                "gpu_type_stats": [],
+            }
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        flow_module.resolve_notebook_compute_group(
+            Context(),
+            session=SimpleNamespace(),
+            workspace_id="ws-test",
+            gpu_count=0,
+            gpu_pattern="CPU",
+            requested_cpu_count=4,
+            auto=False,
+            json_output=True,
+            compute_group_name="CPU资源",
+        )
+
+    assert captured["error_type"] == "ValidationError"
+    assert "missing workspace binding metadata" in captured["message"]
+    assert "workspace_ids" in captured["hint"]
+
+
+def test_resolve_notebook_compute_group_explicit_override_rejects_other_workspace(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    captured: dict[str, str] = {}
+
+    def fake_handle_error(
+        ctx, error_type, message, exit_code, *, hint=None
+    ):  # noqa: ANN001, ANN202
+        captured["error_type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(flow_module, "_handle_error", fake_handle_error)
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-cpu",
+                "name": "CPU资源",
+                "workspace_ids": ["ws-other"],
+                "gpu_type_stats": [],
+            }
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        flow_module.resolve_notebook_compute_group(
+            Context(),
+            session=SimpleNamespace(),
+            workspace_id="ws-test",
+            gpu_count=0,
+            gpu_pattern="CPU",
+            requested_cpu_count=4,
+            auto=False,
+            json_output=True,
+            compute_group_name="CPU资源",
+        )
+
+    assert captured["error_type"] == "ValidationError"
+    assert "is not bound to workspace 'ws-test'" in captured["message"]
+
+
+def test_resolve_notebook_compute_group_explicit_cpu_override_requires_cpu_specs(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    captured: dict[str, str] = {}
+
+    def fake_handle_error(
+        ctx, error_type, message, exit_code, *, hint=None
+    ):  # noqa: ANN001, ANN202
+        captured["error_type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(flow_module, "_handle_error", fake_handle_error)
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-cpu",
+                "name": "CPU资源",
+                "workspace_ids": ["ws-test"],
+                "gpu_type_stats": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "get_resource_prices",
+        lambda workspace_id, logic_compute_group_id, session=None: [],
+    )
+
+    with pytest.raises(SystemExit):
+        flow_module.resolve_notebook_compute_group(
+            Context(),
+            session=SimpleNamespace(),
+            workspace_id="ws-test",
+            gpu_count=0,
+            gpu_pattern="CPU",
+            requested_cpu_count=4,
+            auto=False,
+            json_output=True,
+            compute_group_name="CPU资源",
+        )
+
+    assert captured["error_type"] == "ValidationError"
+    assert "does not expose notebook CPU specs for '4xCPU'" in captured["message"]
+    assert "Specs=yes" in captured["hint"]
+
+
+def test_resolve_notebook_compute_group_cpu_auto_selects_workspace_bound_mixed_group(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-empty",
+                "name": "CPU资源",
+                "workspace_ids": ["ws-test"],
+                "gpu_type_stats": [],
+            },
+            {
+                "logic_compute_group_id": "lcg-h200",
+                "name": "H200-1号机房",
+                "workspace_ids": ["ws-test"],
+                "gpu_type_stats": [{"gpu_info": {"gpu_type": "H200", "gpu_type_display": "H200"}}],
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "get_resource_prices",
+        lambda workspace_id, logic_compute_group_id, session=None: (
+            [{"gpu_count": 0, "cpu_count": 4, "memory_size_gib": 16, "quota_id": "quota-cpu"}]
+            if logic_compute_group_id == "lcg-h200"
+            else []
+        ),
+    )
+
+    result = flow_module.resolve_notebook_compute_group(
+        Context(),
+        session=SimpleNamespace(),
+        workspace_id="ws-test",
+        gpu_count=0,
+        gpu_pattern="CPU",
+        requested_cpu_count=4,
+        auto=False,
+        json_output=True,
+        compute_group_name=None,
+    )
+
+    assert result == ("lcg-h200", "", "CPU", "4xCPU", "H200-1号机房")
+
+
+def test_resolve_notebook_quota_prefers_selected_gpu_type_over_loose_pattern() -> None:
+    schedule = {
+        "quota": [
+            {
+                "id": "quota-h100",
+                "gpu_count": 1,
+                "gpu_type": "NVIDIA_H100",
+                "cpu_count": 20,
+                "memory_size": 80,
+            },
+            {
+                "id": "quota-4090",
+                "gpu_count": 1,
+                "gpu_type": "NVIDIA_RTX_4090",
+                "cpu_count": 16,
+                "memory_size": 64,
+            },
+        ]
+    }
+
+    result = flow_module.resolve_notebook_quota(
+        Context(),
+        schedule=schedule,
+        gpu_count=1,
+        gpu_pattern="4090",
+        requested_cpu_count=None,
+        selected_gpu_type="NVIDIA_RTX_4090",
+    )
+
+    assert result == ("quota-4090", 16, 64, "NVIDIA_RTX_4090", "1x4090")
+
+
+def test_resolve_notebook_quota_cpu_fails_when_schedule_has_no_quota_data(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    captured: dict[str, str] = {}
+
+    def fake_handle_error(
+        ctx, error_type, message, exit_code, *, hint=None
+    ):  # noqa: ANN001, ANN202
+        captured["error_type"] = error_type
+        captured["message"] = message
+        captured["hint"] = hint or ""
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(flow_module, "_handle_error", fake_handle_error)
+
+    with pytest.raises(SystemExit):
+        flow_module.resolve_notebook_quota(
+            Context(),
+            schedule={},
+            gpu_count=0,
+            gpu_pattern="CPU",
+            requested_cpu_count=4,
+            selected_gpu_type="",
+        )
+
+    assert captured["error_type"] == "ValidationError"
+    assert "No CPU quota data returned for 4xCPU" in captured["message"]
+    assert "Specs=yes" in captured["hint"]
+
+
+def test_resolve_notebook_quota_ignores_empty_gpu_type_when_selected_gpu_type_known() -> None:
+    schedule = {
+        "quota": [
+            {
+                "id": "quota-generic",
+                "gpu_count": 1,
+                "gpu_type": "",
+                "cpu_count": 8,
+                "memory_size": 32,
+            },
+            {
+                "id": "quota-4090",
+                "gpu_count": 1,
+                "gpu_type": "NVIDIA_RTX_4090",
+                "cpu_count": 16,
+                "memory_size": 64,
+            },
+        ]
+    }
+
+    result = flow_module.resolve_notebook_quota(
+        Context(),
+        schedule=schedule,
+        gpu_count=1,
+        gpu_pattern="4090",
+        requested_cpu_count=None,
+        selected_gpu_type="NVIDIA_RTX_4090",
+    )
+
+    assert result == ("quota-4090", 16, 64, "NVIDIA_RTX_4090", "1x4090")
 
 
 def _configure_create_happy_path(
@@ -157,7 +589,7 @@ def _configure_create_happy_path(
     monkeypatch.setattr(
         flow_module,
         "resolve_notebook_compute_group",
-        lambda *_args, **_kwargs: ("lcg-1111", "NVIDIA_H100", "H100", "1xH100"),
+        lambda *_args, **_kwargs: ("lcg-1111", "NVIDIA_H100", "H100", "1xH100", "H100 Group"),
     )
     monkeypatch.setattr(flow_module, "_fetch_notebook_schedule", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(
@@ -169,7 +601,7 @@ def _configure_create_happy_path(
     monkeypatch.setattr(
         flow_module,
         "resolve_notebook_resource_spec_price",
-        lambda **_kwargs: ({"gpu_count": 1}, "quota-1111", 20, 80),
+        lambda *_args, **_kwargs: ({"gpu_count": 1}, "quota-1111", 20, 80),
     )
     monkeypatch.setattr(
         flow_module,
@@ -302,6 +734,90 @@ def test_run_notebook_create_skips_post_start_when_wait_fails(monkeypatch) -> No
     assert "post_start_called" not in calls
 
 
+def test_resolve_notebook_compute_group_accepts_explicit_group_name(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-4090-cuda128",
+                "name": "4090-cuda12.8",
+                "compute_group_name": "GPU4090资源组",
+                "gpu_type_stats": [],
+                "workspace_ids": ["ws-test"],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "get_resource_prices",
+        lambda workspace_id, logic_compute_group_id, session=None: [
+            {
+                "gpu_count": 1,
+                "cpu_count": 20,
+                "memory_size_gib": 80,
+                "quota_id": "quota-4090",
+                "gpu_info": {"gpu_type": "NVIDIA_RTX_4090"},
+            }
+        ],
+    )
+
+    result = flow_module.resolve_notebook_compute_group(
+        Context(),
+        session=SimpleNamespace(),
+        workspace_id="ws-test",
+        gpu_count=1,
+        gpu_pattern="4090",
+        requested_cpu_count=None,
+        auto=True,
+        json_output=True,
+        compute_group_name="4090-cuda12.8",
+    )
+
+    assert result == ("lcg-4090-cuda128", "NVIDIA_RTX_4090", "4090", "1x4090", "4090-cuda12.8")
+
+
+def test_fetch_notebook_images_falls_back_to_personal_visible(monkeypatch) -> None:  # noqa: ANN001
+    public_calls: list[str] = []
+    personal_workspace_ids: list[str | None] = []
+
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "list_images",
+        lambda workspace_id, source=None, session=None: (
+            [] if not source else public_calls.append(source) or []
+        ),
+    )
+
+    def fake_list_images_by_source(source, workspace_id=None, session=None):  # noqa: ANN001, ANN202
+        del session
+        personal_workspace_ids.append(workspace_id)
+        if source == "personal-visible":
+            return [
+                SimpleNamespace(image_id="img-personal", url="docker://personal", name="my-image")
+            ]
+        return []
+
+    monkeypatch.setattr(
+        flow_module.browser_api_module, "list_images_by_source", fake_list_images_by_source
+    )
+
+    images = flow_module._fetch_notebook_images(
+        Context(),
+        workspace_id="ws-test",
+        session=SimpleNamespace(),
+        image="my-image",
+        json_output=True,
+    )
+
+    assert images is not None
+    assert any(getattr(item, "name", "") == "my-image" for item in images)
+    assert public_calls == ["SOURCE_PUBLIC"]
+    assert personal_workspace_ids == ["ws-test"]
+
+
 def test_maybe_run_post_start_warns_when_start_is_not_confirmed(
     monkeypatch, capsys
 ) -> None:  # noqa: ANN001
@@ -374,6 +890,44 @@ def test_maybe_wait_for_running_warns_when_no_wait_conflicts_with_post_start(
     assert "Notebook is now RUNNING." in captured.out
     assert calls["notebook_id"] == "nb-123"
     assert calls["timeout"] == 10
+
+
+def test_create_notebook_and_report_json_includes_compute_group(
+    monkeypatch, capsys
+) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        flow_module.browser_api_module,
+        "create_notebook",
+        lambda **kwargs: {"notebook_id": "nb-json", **kwargs},
+    )
+
+    notebook_id = flow_module.create_notebook_and_report(
+        Context(),
+        name="cpu-test",
+        resource_display="4xCPU",
+        selected_project=SimpleNamespace(project_id="project-1", name="Project One"),
+        selected_image=SimpleNamespace(image_id="img-1", url="docker://img", name="Image One"),
+        logic_compute_group_id="lcg-cpu-2",
+        compute_group_name="CPU资源-2",
+        quota_id="quota-4cpu",
+        selected_gpu_type="",
+        gpu_count=0,
+        cpu_count=4,
+        memory_size=16,
+        shm_size=32,
+        auto_stop=False,
+        workspace_id="ws-cpu",
+        session=object(),
+        json_output=True,
+        task_priority=6,
+        resource_spec_price={"gpu_count": 0, "cpu_count": 4},
+    )
+
+    assert notebook_id == "nb-json"
+    payload = flow_module.json.loads(capsys.readouterr().out)
+    assert payload["data"]["notebook_id"] == "nb-json"
+    assert payload["data"]["logic_compute_group_id"] == "lcg-cpu-2"
+    assert payload["data"]["compute_group_name"] == "CPU资源-2"
 
 
 def test_resolve_task_priority_prefers_notebook_priority_over_job_priority() -> None:

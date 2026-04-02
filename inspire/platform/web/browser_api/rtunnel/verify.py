@@ -168,12 +168,9 @@ def wait_for_rtunnel_reachable(
     page: Any,
 ) -> None:
     """Wait until rtunnel becomes reachable via the notebook proxy URL, or raise ValueError."""
-    import sys as _sys
-
     display_url = redact_proxy_url(proxy_url)
     trace_event("proxy_poll_start", proxy_url=display_url, timeout_s=timeout_s)
-    _sys.stderr.write(f"  Polling proxy URL: {display_url}\n")
-    _sys.stderr.flush()
+    _log.debug("  Polling proxy URL: %s", display_url)
 
     start = time.time()
     last_status = None
@@ -184,8 +181,7 @@ def wait_for_rtunnel_reachable(
         attempt += 1
         elapsed = time.time() - start
         if time.time() - last_progress_time >= 30:
-            _sys.stderr.write(f"  Waiting for rtunnel... ({int(elapsed)}s elapsed)\n")
-            _sys.stderr.flush()
+            _log.info("  Waiting for rtunnel... (%ds elapsed)", int(elapsed))
             last_progress_time = time.time()
         try:
             resp = context.request.get(proxy_url, timeout=5000)
@@ -195,8 +191,7 @@ def wait_for_rtunnel_reachable(
                 body = ""
             last_status = _redact_token_like_text(f"{resp.status} {body[:200].strip()}")
             if attempt <= 3:
-                _sys.stderr.write(f"  Attempt {attempt}: {last_status}\n")
-                _sys.stderr.flush()
+                _log.debug("  Attempt %d: %s", attempt, last_status)
             if attempt <= 5:
                 trace_event("proxy_poll_attempt", attempt=attempt, status=last_status)
             if _is_rtunnel_proxy_ready(status=resp.status, body=body):
@@ -217,8 +212,7 @@ def wait_for_rtunnel_reachable(
         ) as e:
             last_status = _summarize_request_error(e)
             if attempt <= 3:
-                _sys.stderr.write(f"  Attempt {attempt}: {last_status}\n")
-                _sys.stderr.flush()
+                _log.debug("  Attempt %d: %s", attempt, last_status)
             if attempt <= 5:
                 trace_event("proxy_poll_attempt_error", attempt=attempt, error=last_status)
 

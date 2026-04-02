@@ -165,6 +165,7 @@ def test_list_private_images_calls_api(monkeypatch: pytest.MonkeyPatch):
 
 def test_list_images_by_source_official(monkeypatch: pytest.MonkeyPatch):
     captured: dict[str, Any] = {}
+    captured_workspace_ids: list[Optional[str]] = []
 
     def fake_request_notebooks_data(
         session,
@@ -199,15 +200,18 @@ def test_list_images_by_source_official(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         images_module,
         "_get_session_and_workspace_id",
-        lambda workspace_id, session: (FakeWebSession(), "ws-test"),
+        lambda workspace_id, session: captured_workspace_ids.append(workspace_id)
+        or (FakeWebSession(), workspace_id or "ws-test"),
     )
 
-    results = list_images_by_source(source="official")
+    results = list_images_by_source(source="official", workspace_id="ws-explicit")
     assert len(results) == 1
     assert results[0].image_id == "img-off-001"
     assert results[0].source == "SOURCE_OFFICIAL"
     assert results[0].status == "READY"
+    assert captured_workspace_ids == ["ws-explicit"]
     assert captured["body"]["filter"]["source"] == "SOURCE_OFFICIAL"
+    assert captured["body"]["filter"]["registry_hint"]["workspace_id"] == "ws-explicit"
 
 
 def test_list_images_by_source_public(monkeypatch: pytest.MonkeyPatch):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -19,6 +19,8 @@ class GPUAvailability:
     free_nodes: int = 0
     gpu_per_node: int = 0
     selection_source: str = "aggregate"
+    workspace_ids: list[str] = field(default_factory=list)
+    workspace_aliases: list[str] = field(default_factory=list)
 
 
 @dataclass

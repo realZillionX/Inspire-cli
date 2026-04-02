@@ -44,7 +44,7 @@ def _get_base_url() -> str:
     except Exception:
         pass
 
-    _cached_base_url = os.environ.get("INSPIRE_BASE_URL", DEFAULT_BASE_URL)
+    _cached_base_url = os.environ.get("INSPIRE_BASE_URL", DEFAULT_BASE_URL).strip()
     return _cached_base_url
 
 
@@ -73,7 +73,7 @@ def _get_browser_api_prefix() -> str:
         return _cached_browser_api_prefix
 
     # Check environment variable first (highest priority)
-    env_prefix = os.environ.get("INSPIRE_BROWSER_API_PREFIX")
+    env_prefix = os.environ.get("INSPIRE_BROWSER_API_PREFIX", "").strip()
     if env_prefix:
         _cached_browser_api_prefix = env_prefix
         return _cached_browser_api_prefix

@@ -16,6 +16,7 @@ import click
 from inspire.config import (
     CONFIG_FILENAME,
     PROJECT_CONFIG_DIR,
+    SOURCE_INFERRED,
     Config,
 )
 
@@ -597,6 +598,7 @@ def _resolve_credentials_interactive(
     *,
     cli_username: str | None,
     cli_base_url: str | None,
+    allow_config_username: bool = True,
     allow_config_password: bool = False,
 ) -> tuple[str, str, str, bool]:
     """Resolve base_url, username, and password, prompting when missing."""
@@ -616,7 +618,7 @@ def _resolve_credentials_interactive(
 
     # --- username ---
     username = (cli_username or "").strip()
-    if not username:
+    if not username and allow_config_username:
         cfg_username = str(getattr(config, "username", "") or "").strip()
         if cfg_username:
             username = cfg_username
@@ -643,6 +645,66 @@ def _resolve_credentials_interactive(
         raise SystemExit(1)
 
     return username, password, base_url, prompted_password
+
+
+def _login_with_saved_or_prompted_credentials(
+    *,
+    config: object,
+    web_session_module,  # noqa: ANN001
+    cli_username: str | None,
+    cli_base_url: str | None,
+) -> tuple[object, tuple[str, str, str] | None, bool]:
+    """Login for discover, preferring saved config credentials on migration/reruns.
+
+    Behavior:
+    - If username/base_url/password are already resolvable from config, try them
+      first without prompting.
+    - If that login fails, prompt only for the missing or stale password and
+      retry.
+    - Returned ``prompted_credentials`` is populated only when the user was
+      actually prompted, so reruns do not rewrite the stored password unless it
+      changed interactively.
+    """
+    username, password, base_url, prompted_password = _resolve_credentials_interactive(
+        config,
+        cli_username=cli_username,
+        cli_base_url=cli_base_url,
+        allow_config_password=True,
+    )
+
+    click.echo("Logging in...")
+    if prompted_password:
+        session = web_session_module.login_with_playwright(
+            username,
+            password,
+            base_url=base_url,
+        )
+        click.echo("Logged in.")
+        return session, (username, password, base_url), True
+
+    try:
+        session = web_session_module.login_with_playwright(
+            username,
+            password,
+            base_url=base_url,
+        )
+        click.echo("Logged in.")
+        return session, None, False
+    except Exception:
+        click.echo("Stored credentials failed; please enter the password again.")
+        username, password, base_url, prompted_password = _resolve_credentials_interactive(
+            config,
+            cli_username=cli_username,
+            cli_base_url=cli_base_url,
+            allow_config_password=False,
+        )
+        session = web_session_module.login_with_playwright(
+            username,
+            password,
+            base_url=base_url,
+        )
+        click.echo("Logged in.")
+        return session, (username, password, base_url), prompted_password
 
 
 def _ensure_ssh_key() -> None:
@@ -803,7 +865,11 @@ def _resolve_discover_runtime(
             config,
             cli_username=cli_username,
             cli_base_url=cli_base_url,
-            allow_config_password=True,
+            allow_config_username=bool(cli_username),
+            # CLI overrides force an interactive login path; do not silently
+            # reuse a config-derived password because the caller may be fixing
+            # stale credentials while updating the username or base URL.
+            allow_config_password=False,
         )
         prompted_credentials = (username, password, base_url)
         click.echo("Logging in...")
@@ -818,19 +884,14 @@ def _resolve_discover_runtime(
             session = web_session_module.get_web_session(require_workspace=True)
         except (ValueError, RuntimeError):
             _ensure_playwright_browser()
-            username, password, base_url, prompted_password = _resolve_credentials_interactive(
-                config,
-                cli_username=cli_username,
-                cli_base_url=cli_base_url,
+            session, prompted_credentials, prompted_password = (
+                _login_with_saved_or_prompted_credentials(
+                    config=config,
+                    web_session_module=web_session_module,
+                    cli_username=cli_username,
+                    cli_base_url=cli_base_url,
+                )
             )
-            prompted_credentials = (username, password, base_url)
-            click.echo("Logging in...")
-            session = web_session_module.login_with_playwright(
-                username,
-                password,
-                base_url=base_url,
-            )
-            click.echo("Logged in.")
 
     if prompted_credentials:
         account_key = prompted_credentials[0]
@@ -1185,12 +1246,21 @@ def _get_existing_workspace_aliases(
     global_data: dict[str, Any],
     account_section: dict[str, Any],
 ) -> dict[str, str]:
-    existing_workspaces = global_data.get("workspaces")
-    if not isinstance(existing_workspaces, dict):
-        existing_workspaces = account_section.get("workspaces")
-    if not isinstance(existing_workspaces, dict):
-        return {}
-    return dict(existing_workspaces)
+    existing_workspaces = account_section.get("workspaces")
+    if isinstance(existing_workspaces, dict):
+        merged = {str(k): str(v) for k, v in existing_workspaces.items()}
+    else:
+        merged = {}
+
+    legacy_global_workspaces = global_data.get("workspaces")
+    if isinstance(legacy_global_workspaces, dict):
+        for raw_alias, raw_workspace_id in legacy_global_workspaces.items():
+            alias = str(raw_alias or "").strip()
+            workspace_value = str(raw_workspace_id or "").strip()
+            if alias and workspace_value and alias not in merged:
+                merged[alias] = workspace_value
+
+    return merged
 
 
 def _merge_workspace_aliases(
@@ -1338,7 +1408,7 @@ def _persist_workspace_aliases(
     session,  # noqa: ANN001
     workspace_id: str,
     force: bool,
-) -> None:
+) -> dict[str, str]:
     merged_workspaces = _get_existing_workspace_aliases(
         global_data=global_data,
         account_section=account_section,
@@ -1360,8 +1430,9 @@ def _persist_workspace_aliases(
         discovered_workspace_ids=discovered_workspace_ids,
         discovered_workspace_names=discovered_workspace_names,
     )
-    global_data["workspaces"] = merged_workspaces
-    account_section.pop("workspaces", None)
+    account_section["workspaces"] = merged_workspaces
+    global_data.pop("workspaces", None)
+    return merged_workspaces
 
 
 def _persist_api_base_url(
@@ -1467,6 +1538,39 @@ def _discover_compute_groups(
     return compute_groups
 
 
+def _discover_workspace_specs(
+    *,
+    browser_api_module,  # noqa: ANN001
+    session,  # noqa: ANN001
+    workspace_id: str,
+) -> list[dict[str, Any]]:
+    """Discover resource specs for a workspace from browser API.
+
+    Returns list of spec dictionaries suitable for persistence to config.
+    Follows same pattern as _discover_compute_groups().
+    """
+    try:
+        from inspire.platform.openapi.workspace_specs import fetch_workspace_specs
+
+        specs = fetch_workspace_specs(workspace_id)
+        return [
+            {
+                "spec_id": spec.spec_id,
+                "gpu_type": (
+                    spec.gpu_type.value if hasattr(spec.gpu_type, "value") else str(spec.gpu_type)
+                ),
+                "gpu_count": spec.gpu_count,
+                "cpu_cores": spec.cpu_cores,
+                "memory_gb": spec.memory_gb,
+                "gpu_memory_gb": spec.gpu_memory_gb,
+                "description": spec.description,
+            }
+            for spec in specs
+        ]
+    except Exception:
+        return []
+
+
 def _correct_workspace_aliases(
     merged_workspaces: dict[str, str],
     compute_groups: list[dict[str, Any]],
@@ -1523,6 +1627,50 @@ def _persist_compute_groups(
             existing_compute_groups, compute_groups
         )
     account_section.pop("compute_groups", None)
+
+
+def _persist_workspace_specs(
+    *,
+    global_data: dict[str, Any],
+    workspace_specs: dict[str, list[dict[str, Any]]],
+    workspace_names: dict[str, str] | None = None,
+) -> tuple[int, int, int]:
+    """Persist discovered workspace specs to global config.
+
+    Flat structure: workspace_specs.<id> = [spec_dict, ...]
+    Preserves existing specs (backward compatible).
+
+    Args:
+        global_data: The global config data dict to modify
+        workspace_specs: Dict mapping workspace_id -> list of spec dicts
+        workspace_names: Optional dict mapping workspace_id -> workspace name
+
+    Returns:
+        Tuple of (new_workspaces, existing_workspaces, total_specs)
+    """
+    if "workspace_specs" not in global_data:
+        global_data["workspace_specs"] = {}
+
+    existing_specs = global_data["workspace_specs"]
+    new_count = 0
+    existing_count = 0
+    total_specs = 0
+
+    for workspace_id, specs in workspace_specs.items():
+        if workspace_id in existing_specs:
+            existing_count += 1
+            total_specs += len(existing_specs[workspace_id])
+        else:
+            global_data["workspace_specs"][workspace_id] = specs
+            new_count += 1
+            total_specs += len(specs)
+
+    if workspace_names:
+        global_data.setdefault("workspace_names", {})
+        for ws_id, ws_name in workspace_names.items():
+            global_data["workspace_names"].setdefault(ws_id, ws_name)
+
+    return new_count, existing_count, total_specs
 
 
 def _resolve_probe_defaults(
@@ -1767,18 +1915,27 @@ def _prompt_target_dir(
     *,
     force: bool,
     cli_target_dir: str | None,
+    existing_target_dir: str | None,
     selected_project: object,
     project_catalog: dict[str, dict[str, Any]],
 ) -> str | None:
-    """Prompt for target_dir, using the catalog workdir as suggestion."""
+    """Resolve target_dir while preserving explicit user config when present.
+
+    Ownership rule:
+    - ``cli_target_dir`` is an explicit discover-time override and wins.
+    - ``existing_target_dir`` is a user-managed setting from config and must be
+      preserved across reruns.
+    - ``catalog_workdir`` is a discovery hint only; it should fill blanks, not
+      overwrite an intentional user value.
+    """
     project_id = str(getattr(selected_project, "project_id", "") or "").strip()
     entry = project_catalog.get(project_id, {})
     catalog_workdir = str(entry.get("workdir") or "").strip()
 
     if force:
-        return cli_target_dir or catalog_workdir or None
+        return cli_target_dir or existing_target_dir or catalog_workdir or None
 
-    default = cli_target_dir or catalog_workdir or ""
+    default = cli_target_dir or existing_target_dir or catalog_workdir or ""
     if default:
         result = click.prompt(
             "Target directory on shared filesystem",
@@ -1804,6 +1961,22 @@ def _write_discovered_project_config(
     project_data: dict[str, Any] = {}
     if project_path.exists():
         project_data = Config._load_toml(project_path)
+
+    # Legacy top-level [workspaces] was the old discover output. Workspace
+    # routing is account-scoped now, so remove the stale project-level table.
+    project_data.pop("workspaces", None)
+
+    # Legacy project-level [[compute_groups]] from old discover runs had no
+    # workspace binding metadata. If every entry is unbound, drop the whole
+    # block so the refreshed global catalog becomes authoritative. Preserve any
+    # modern project-specific overrides that already carry workspace_ids.
+    legacy_project_compute_groups = project_data.get("compute_groups")
+    if isinstance(legacy_project_compute_groups, list) and legacy_project_compute_groups:
+        if all(
+            isinstance(item, dict) and not (item.get("workspace_ids") or [])
+            for item in legacy_project_compute_groups
+        ):
+            project_data.pop("compute_groups", None)
 
     auth_section = _get_or_create_dict_table(container=project_data, key="auth")
     auth_section["username"] = account_key
@@ -1856,6 +2029,13 @@ def _print_discover_completion(
 
 
 def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
+    """Persist discovery-owned catalog state without clobbering user-owned config.
+
+    Discover owns per-account catalog data such as projects, workspaces,
+    project_catalog, and the shared compute-group catalog. User-managed sections
+    like ``[defaults]`` and ``[ssh]`` must survive repeated reruns unchanged
+    unless the user explicitly overrides them during discover.
+    """
     force = request.force
     config = request.config
     browser_api_module = request.browser_api_module
@@ -1908,7 +2088,7 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         alias_for_id=alias_for_id,
     )
 
-    _persist_workspace_aliases(
+    merged_workspaces = _persist_workspace_aliases(
         global_data=global_data,
         account_section=account_section,
         config=config,
@@ -1916,9 +2096,6 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         workspace_id=workspace_id,
         force=force,
     )
-    merged_workspaces = global_data.get("workspaces")
-    if not isinstance(merged_workspaces, dict):
-        merged_workspaces = {}
 
     _persist_api_base_url(
         global_data=global_data,
@@ -1958,6 +2135,41 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
         account_section=account_section,
         compute_groups=compute_groups,
     )
+
+    # Discover resource specs for all workspaces
+    click.echo()
+    click.echo(click.style("Discovering resource specs...", bold=True))
+    discovered_specs: dict[str, list[dict[str, Any]]] = {}
+    for ws_id in sorted(all_ws_ids):
+        specs = _discover_workspace_specs(
+            browser_api_module=browser_api_module,
+            session=session,
+            workspace_id=ws_id,
+        )
+        if specs:
+            discovered_specs[ws_id] = specs
+            click.echo(f"  Workspace {ws_id}: {len(specs)} specs discovered")
+    # Collect workspace names from session
+    workspace_names: dict[str, str] = {}
+    if session and hasattr(session, "all_workspace_names") and session.all_workspace_names:
+        workspace_names = dict(session.all_workspace_names)
+
+    new_ws, existing_ws, total_specs = _persist_workspace_specs(
+        global_data=global_data,
+        workspace_specs=discovered_specs,
+        workspace_names=workspace_names,
+    )
+    if new_ws > 0 and existing_ws > 0:
+        click.echo(
+            f"✓ Cached resource specs for {new_ws} new workspace(s), "
+            f"skipped {existing_ws} already cached ({total_specs} total specs)"
+        )
+    elif new_ws > 0:
+        click.echo(f"✓ Cached resource specs for {new_ws} workspace(s) ({total_specs} total specs)")
+    elif existing_ws > 0:
+        click.echo(f"✓ All {existing_ws} workspace(s) already cached ({total_specs} total specs)")
+    else:
+        click.echo("✓ No resource specs discovered")
 
     if probe_shared_path:
         click.echo()
@@ -2002,6 +2214,7 @@ def _persist_discovery_catalog(request: _DiscoveryPersistRequest) -> None:
     target_dir = _prompt_target_dir(
         force=force,
         cli_target_dir=cli_target_dir,
+        existing_target_dir=config.target_dir,
         selected_project=selected_project,
         project_catalog=project_catalog,
     )
@@ -2038,6 +2251,13 @@ def _init_discover_mode(
     from inspire.platform.web.session import DEFAULT_WORKSPACE_ID
 
     config, _ = Config.from_files_and_env(require_credentials=False, require_target_dir=False)
+    username_source = str(getattr(config, "_sources", {}).get("username") or "")
+    if not (cli_username or "").strip() and username_source == SOURCE_INFERRED:
+        raise ValueError(
+            "Discover requires an explicit account when only one [accounts] entry is configured. "
+            "Set --username, INSPIRE_USERNAME, or [auth].username before running --discover."
+        )
+
     session, prompted_credentials, prompted_password, account_key, workspace_id = (
         _resolve_discover_runtime(
             config=config,

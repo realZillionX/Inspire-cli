@@ -44,8 +44,10 @@ from inspire.cli.context import (
 )
 from inspire.cli.formatters import json_formatter
 from inspire.cli.utils.auth import AuthManager
+from inspire.cli.utils.common import json_option
 from inspire.cli.utils.errors import exit_with_error as _handle_error
 from inspire.cli.utils.job_cli import resolve_job_id
+from inspire.cli.utils.notebook_cli import resolve_json_output
 from inspire.config import Config, ConfigError
 
 
@@ -773,7 +775,7 @@ def _bulk_update_logs(
     refresh: bool,
 ) -> None:
     try:
-        config = Config.from_env(require_target_dir=False)
+        config, _ = Config.from_files_and_env(require_target_dir=False)
         cache = job_deps.JobCache(config.get_expanded_cache_path())
 
         alias_map = {
@@ -902,7 +904,7 @@ def _run_job_logs_single_job(
     bridge: Optional[str] = None,
 ) -> None:
     try:
-        config = Config.from_env(require_target_dir=False)
+        config, _ = Config.from_files_and_env(require_target_dir=False)
         cache = job_deps.JobCache(config.get_expanded_cache_path())
 
         cached = cache.get_job(job_id)
@@ -1089,6 +1091,7 @@ def _run_job_logs_single_job(
     "-b",
     help="Bridge profile to use for SSH tunnel fast path",
 )
+@json_option
 @pass_context
 def logs(
     ctx: Context,
@@ -1102,7 +1105,9 @@ def logs(
     status: tuple,
     limit: int,
     bridge: Optional[str],
+    json_output: bool = False,
 ) -> None:
+    json_output = resolve_json_output(ctx, json_output)
     """View logs for a training job.
 
     Fetches logs via Gitea workflow and caches them locally.

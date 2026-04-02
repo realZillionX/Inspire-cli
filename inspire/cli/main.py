@@ -13,7 +13,11 @@ import click
 
 from inspire import __version__
 from inspire.cli.utils.profile import apply_env_profile
-from inspire.cli.logging_setup import clear_debug_logging, configure_debug_logging
+from inspire.cli.logging_setup import (
+    _configure_json_logging,
+    clear_debug_logging,
+    configure_debug_logging,
+)
 from inspire.cli.context import (
     Context,
     pass_context,
@@ -31,6 +35,7 @@ from inspire.cli.commands import (
     init,
     image,
     project,
+    mount,
 )
 
 
@@ -84,6 +89,9 @@ def main(ctx: Context, json_output: bool, debug: bool) -> None:
     else:
         clear_debug_logging()
 
+    if json_output:
+        _configure_json_logging()
+
 
 # Register command groups
 main.add_command(job)
@@ -97,6 +105,7 @@ main.add_command(notebook)
 main.add_command(init)
 main.add_command(image)
 main.add_command(project)
+main.add_command(mount)
 
 
 def cli() -> None:

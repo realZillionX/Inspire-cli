@@ -25,6 +25,7 @@ SOURCE_DEFAULT = "default"
 SOURCE_GLOBAL = "global"
 SOURCE_PROJECT = "project"
 SOURCE_ENV = "env"
+SOURCE_INFERRED = "inferred"
 
 
 def _default_rtunnel_download_url() -> str:
@@ -110,7 +111,7 @@ class Config:
     workspace_gpu_id: Optional[str] = None
     workspace_internet_id: Optional[str] = None
 
-    # Full workspace map loaded from TOML [workspaces]
+    # Full workspace map loaded from account-scoped [accounts."<user>".workspaces]
     workspaces: dict[str, str] = field(default_factory=dict)
 
     # Project alias map for project_id resolution (alias -> project-...)
@@ -148,6 +149,7 @@ class Config:
     rtunnel_download_url: str = field(default_factory=_default_rtunnel_download_url)
     apt_mirror_url: Optional[str] = None
     rtunnel_upload_policy: str = "auto"
+    ssh_port: int = 22222
 
     # Tunnel retry settings
     tunnel_retries: int = 3
@@ -161,6 +163,17 @@ class Config:
 
     # Compute groups (loaded from config.toml [[compute_groups]] sections)
     compute_groups: list[dict] = field(default_factory=list)
+
+    # Workspace resource specs registry (auto-discovered from browser API)
+    # Structure: {workspace_id: [spec_dict, ...]}
+    # Each spec_dict: {spec_id, gpu_type, gpu_count, cpu_cores, memory_gb, gpu_memory_gb, description}
+    # Discovered once per workspace and persisted. No TTL - specs are stable.
+    workspace_specs: dict[str, list[dict]] = field(default_factory=dict)
+
+    # Workspace names registry (auto-discovered from browser API)
+    # Structure: {workspace_id: "workspace_name"}
+    # Maps workspace IDs to their human-readable names.
+    workspace_names: dict[str, str] = field(default_factory=dict)
 
     # Remote environment variables (injected into bridge exec, jobs, run commands)
     remote_env: dict[str, str] = field(default_factory=dict)

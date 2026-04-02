@@ -38,11 +38,16 @@ from inspire.bridge.tunnel import (
     run_ssh_command_streaming,
     load_tunnel_config,
 )
+from inspire.cli.utils.common import json_option
 from inspire.cli.utils.errors import emit_error as _emit_error
+from inspire.cli.utils.notebook_cli import resolve_json_output
 from inspire.cli.utils.notebook_cli import require_web_session
 from inspire.cli.utils.output import (
-    emit_error as emit_output_error,
-    emit_success as emit_output_success,
+    emit_error,
+    emit_info,
+    emit_progress,
+    emit_success,
+    emit_warning,
 )
 from inspire.cli.utils.tunnel_reconnect import (
     NotebookBridgeReconnectState,
@@ -359,7 +364,7 @@ def try_exec_via_ssh_tunnel(
                 if returncode == 0:
                     stdout = getattr(result, "stdout", "") or ""
                     stderr = getattr(result, "stderr", "") or ""
-                    emit_output_success(
+                    emit_success(
                         ctx,
                         payload={
                             "status": "success",
@@ -381,13 +386,13 @@ def try_exec_via_ssh_tunnel(
                 return _emit_command_failed(ctx, returncode=returncode)
 
             if _verbose_output(ctx) and not opened_once:
-                click.echo("Using SSH tunnel (fast path)")
-                click.echo(f"Bridge: {resolved_bridge_name}")
-                click.echo(f"Command: {command}")
-                click.echo(f"Working dir: {config.target_dir}")
+                emit_info(ctx, "Using SSH tunnel (fast path)")
+                emit_info(ctx, f"Bridge: {resolved_bridge_name}")
+                emit_info(ctx, f"Command: {command}")
+                emit_info(ctx, f"Working dir: {config.target_dir}")
                 if stdin_mode:
-                    click.echo("Stdin: passthrough")
-                click.echo("--- Command Output ---")
+                    emit_info(ctx, "Stdin: passthrough")
+                emit_info(ctx, "--- Command Output ---")
                 opened_once = True
 
             ssh_execution_started = True
@@ -400,10 +405,14 @@ def try_exec_via_ssh_tunnel(
                 stream_kwargs["pass_stdin"] = True
             exit_code = run_ssh_command_streaming_fn(**stream_kwargs)
             if _verbose_output(ctx):
-                click.echo("--- End Output ---")
+                emit_info(ctx, "--- End Output ---")
 
             if exit_code == 0:
-                click.echo("OK")
+                emit_success(
+                    ctx,
+                    payload={"status": "success", "method": "ssh_tunnel", "returncode": 0},
+                    text="command executed successfully",
+                )
                 return EXIT_SUCCESS
 
             if _should_retry_after_disconnect_code(
@@ -426,12 +435,11 @@ def try_exec_via_ssh_tunnel(
             force_rebuild = True
             continue
         except subprocess.TimeoutExpired:
-            emit_output_error(
+            emit_error(
                 ctx,
                 error_type="Timeout",
                 message=f"Command timed out after {timeout_s}s",
                 exit_code=EXIT_TIMEOUT,
-                human_lines=[f"Command timed out after {timeout_s}s"],
             )
             return EXIT_TIMEOUT
         except Exception as e:
@@ -472,19 +480,19 @@ def exec_via_workflow(
     merged_denylist.extend(split_denylist(denylist))
 
     if not merged_denylist and _verbose_output(ctx):
-        click.echo("Warning: no denylist provided; proceeding", err=True)
+        emit_warning(ctx, "no denylist provided; proceeding")
 
     request_id = f"{int(time.time())}-{os.getpid()}"
     artifact_paths_list = list(artifact_path)
 
     if _verbose_output(ctx):
-        click.echo(f"Triggering bridge exec (request {request_id})")
-        click.echo(f"Command: {command}")
-        click.echo(f"Working dir: {config.target_dir}")
+        emit_info(ctx, f"Triggering bridge exec (request {request_id})")
+        emit_info(ctx, f"Command: {command}")
+        emit_info(ctx, f"Working dir: {config.target_dir}")
         if merged_denylist:
-            click.echo(f"Denylist: {merged_denylist}")
+            emit_info(ctx, f"Denylist: {merged_denylist}")
         if artifact_paths_list:
-            click.echo(f"Artifact paths: {artifact_paths_list}")
+            emit_info(ctx, f"Artifact paths: {artifact_paths_list}")
 
     try:
         logger.debug(
@@ -502,17 +510,16 @@ def exec_via_workflow(
             denylist=merged_denylist,
         )
     except (GiteaError, GiteaAuthError) as e:
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="GiteaError",
             message=str(e),
             exit_code=EXIT_GENERAL_ERROR,
-            human_lines=[f"Error: {e}"],
         )
         return EXIT_GENERAL_ERROR
 
     if not wait:
-        emit_output_success(
+        emit_success(
             ctx,
             payload={
                 "status": "triggered",
@@ -524,7 +531,7 @@ def exec_via_workflow(
         return EXIT_SUCCESS
 
     if _verbose_output(ctx):
-        click.echo(f"Waiting for completion (timeout {timeout_s}s)...")
+        emit_progress(ctx, f"Waiting for completion (timeout {timeout_s}s)...")
 
     try:
         result = wait_for_bridge_action_completion_fn(
@@ -534,21 +541,19 @@ def exec_via_workflow(
         )
         logger.debug("bridge_exec workflow result request_id=%s result=%s", request_id, result)
     except TimeoutError as e:
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="Timeout",
-            message=str(e),
+            message=f"Timeout: {e}",
             exit_code=EXIT_TIMEOUT,
-            human_lines=[f"Timeout: {e}"],
         )
         return EXIT_TIMEOUT
     except GiteaError as e:
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="GiteaError",
             message=str(e),
             exit_code=EXIT_GENERAL_ERROR,
-            human_lines=[f"Error: {e}"],
         )
         return EXIT_GENERAL_ERROR
 
@@ -572,41 +577,46 @@ def exec_via_workflow(
 
     if result.get("conclusion") != "success":
         hint = result.get("html_url") or None
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="BridgeActionFailed",
             message=f"Action failed: {result.get('conclusion')}",
             exit_code=EXIT_GENERAL_ERROR,
             hint=hint,
-            human_lines=[
-                f"Action failed: {result.get('conclusion')} (see {result.get('html_url', '')})"
-            ],
         )
         return EXIT_GENERAL_ERROR
 
     if download:
         if _verbose_output(ctx):
-            click.echo(f"Downloading artifact to {download}...")
+            emit_progress(ctx, f"Downloading artifact to {download}...")
         try:
             download_bridge_artifact_fn(config, request_id, Path(download))
         except GiteaError as e:
-            emit_output_error(
+            emit_error(
                 ctx,
                 error_type="ArtifactError",
                 message=f"Artifact download failed: {e}",
                 exit_code=EXIT_GENERAL_ERROR,
-                human_lines=[f"Warning: artifact download failed: {e}"],
             )
             return EXIT_GENERAL_ERROR
 
     if _verbose_output(ctx):
-        click.echo("OK Action completed successfully")
+        emit_success(
+            ctx,
+            payload={
+                "status": "success",
+                "request_id": request_id,
+                "artifact_downloaded": bool(download),
+                "output": output_log,
+            },
+            text="Action completed successfully",
+        )
         if result.get("html_url"):
-            click.echo(f"Workflow: {result.get('html_url')}")
+            emit_info(ctx, f"Workflow: {result.get('html_url')}")
         if download:
-            click.echo("Artifacts downloaded")
+            emit_info(ctx, "Artifacts downloaded")
     else:
-        emit_output_success(
+        emit_success(
             ctx,
             payload={
                 "status": "success",
@@ -661,6 +671,7 @@ def exec_via_workflow(
     is_flag=True,
     help="Force stdin passthrough to remote command over SSH (auto when stdin is piped)",
 )
+@json_option
 @pass_context
 def exec_command(
     ctx: Context,
@@ -672,7 +683,9 @@ def exec_command(
     timeout: Optional[int],
     bridge: Optional[str],
     stdin_mode: bool,
+    json_output: bool = False,
 ) -> None:
+    json_output = resolve_json_output(ctx, json_output)
     """Execute a command on the Bridge runner.
 
     Uses SSH tunnel for command execution. Workflow transport is fallback-only
@@ -697,38 +710,33 @@ def exec_command(
     try:
         config, _ = Config.from_files_and_env(require_target_dir=True, require_credentials=False)
     except ConfigError as e:
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="ConfigError",
-            message=str(e),
+            message=f"Configuration error: {e}",
             exit_code=EXIT_CONFIG_ERROR,
-            human_lines=[f"Configuration error: {e}"],
         )
         sys.exit(EXIT_CONFIG_ERROR)
 
     try:
         env_exports = build_env_exports(config.remote_env)
     except ConfigError as e:
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="ConfigError",
-            message=str(e),
+            message=f"Configuration error: {e}",
             exit_code=EXIT_CONFIG_ERROR,
-            human_lines=[f"Configuration error: {e}"],
         )
         sys.exit(EXIT_CONFIG_ERROR)
 
     action_timeout = int(timeout) if timeout is not None else int(config.bridge_action_timeout)
 
     if stdin_mode and (artifact_path or download):
-        emit_output_error(
+        emit_error(
             ctx,
             error_type="UsageError",
-            message="--stdin/--bash-stdin is only supported for SSH execution (no artifacts).",
+            message="--stdin/--bash-stdin cannot be combined with --artifact-path/--download",
             exit_code=EXIT_GENERAL_ERROR,
-            human_lines=[
-                "--stdin/--bash-stdin cannot be combined with --artifact-path/--download."
-            ],
         )
         sys.exit(EXIT_GENERAL_ERROR)
 

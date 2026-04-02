@@ -18,9 +18,14 @@ from .models import (
     TunnelNotAvailableError,
 )
 from .rtunnel import _ensure_rtunnel_binary
-from .ssh import _get_proxy_command
+from .ssh import _get_proxy_command, _identity_args
 
 logger = logging.getLogger(__name__)
+
+
+# Constants for remote shell execution
+REMOTE_LOCALE_EXPORT = "export LC_ALL=C LANG=C;"
+QUIET_SHELL_ARGS = ["bash", "--noprofile", "--norc"]
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +73,7 @@ def _build_stdin_script(command: str) -> str:
     arguments, which would otherwise make ``pkill -f <pattern>`` match
     the parent bash process and tear down the SSH session.
     """
-    return f"export LC_ALL=C LANG=C; {command}\n"
+    return f"{REMOTE_LOCALE_EXPORT} {command}\n"
 
 
 def _ssh_locale_args() -> list[str]:
@@ -85,12 +90,12 @@ def _ssh_locale_args() -> list[str]:
 
 def _quiet_remote_shell_args() -> list[str]:
     """Return a non-login shell argv for command execution."""
-    return ["bash", "--noprofile", "--norc"]
+    return QUIET_SHELL_ARGS[:]
 
 
 def _wrap_remote_command(command: str) -> str:
     """Wrap a remote command in a quiet bash shell to avoid login banners."""
-    return f"bash --noprofile --norc -lc {shlex.quote(command)}"
+    return f"{' '.join(QUIET_SHELL_ARGS)} -lc {shlex.quote(command)}"
 
 
 def _build_ssh_base_args(
@@ -199,9 +204,40 @@ def get_ssh_command_args(
     config: Optional[TunnelConfig] = None,
     remote_command: Optional[str] = None,
 ) -> list[str]:
-    """Build SSH command arguments with ProxyCommand."""
-    _config, bridge, proxy_cmd = _resolve_bridge_and_proxy(bridge_name, config)
-    args = _build_ssh_base_args(bridge=bridge, proxy_cmd=proxy_cmd, batch_mode=False)
+    """Build SSH command arguments using stdio:// ProxyCommand."""
+    if config is None:
+        config = load_tunnel_config()
+
+    bridge = config.get_bridge(bridge_name)
+    if not bridge:
+        if bridge_name:
+            raise BridgeNotFoundError(f"Bridge '{bridge_name}' not found")
+        raise TunnelNotAvailableError(
+            "No bridge configured. Run 'inspire tunnel add <name> <url>' first."
+        )
+
+    _ensure_rtunnel_binary(config)
+
+    proxy_cmd = _get_proxy_command(bridge, config.rtunnel_bin)
+
+    args = [
+        "ssh",
+        *_identity_args(bridge),
+        *_ssh_locale_args(),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"ProxyCommand={proxy_cmd}",
+        "-o",
+        "LogLevel=ERROR",
+        "-p",
+        str(bridge.ssh_port),
+        f"{bridge.ssh_user}@localhost",
+    ]
     if remote_command:
         args.append(_wrap_remote_command(remote_command))
     return args

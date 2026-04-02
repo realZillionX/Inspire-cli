@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+import os
 from pathlib import Path
 
 from inspire.config.models import (
@@ -10,6 +11,7 @@ from inspire.config.models import (
     ConfigDeprecationWarning,
     SOURCE_ENV,
     SOURCE_GLOBAL,
+    SOURCE_INFERRED,
     SOURCE_PROJECT,
 )
 from inspire.config.toml import _find_project_config
@@ -50,7 +52,7 @@ def _warn_legacy_project_context_keys(
     if "[context].project" in legacy_keys:
         replacements.append("[job].project_id or [defaults].project_order")
     if any(key.startswith("[context].workspace") for key in legacy_keys):
-        replacements.append("[workspaces] aliases plus --workspace")
+        replacements.append('[accounts."<user>".workspaces] aliases plus --workspace')
     replacements_label = " and ".join(replacements)
 
     warnings.warn(
@@ -99,7 +101,7 @@ def _warn_legacy_workspace_id_keys(
         warnings.warn(
             (
                 f"{location} uses deprecated workspace pin {subject}. "
-                "Prefer [workspaces] aliases plus --workspace, and reserve "
+                'Prefer [accounts."<user>".workspaces] aliases plus --workspace, and reserve '
                 "--workspace-id for one-off explicit overrides. Legacy workspace_id "
                 "pins still work for now, but will be removed in a future release."
             ),
@@ -139,6 +141,33 @@ def config_from_files_and_env(
     if context_account:
         config_dict["context_account"] = context_account
         sources["context_account"] = SOURCE_PROJECT
+
+    env_username = str(os.getenv("INSPIRE_USERNAME") or "").strip()
+    username_source = sources.get("username")
+    if env_username and not (
+        prefer_source == "toml" and (username_source == SOURCE_PROJECT or bool(context_account))
+    ):
+        config_dict["username"] = env_username
+        sources["username"] = SOURCE_ENV
+
+    current_username = str(config_dict.get("username") or "").strip()
+    if not current_username and not context_account:
+        candidate_accounts = set(global_account_catalogs.keys()) | set(
+            project_account_catalogs.keys()
+        )
+        if len(candidate_accounts) == 1:
+            inferred_username = next(iter(candidate_accounts))
+            config_dict["username"] = inferred_username
+            sources["username"] = SOURCE_INFERRED
+            warnings.warn(
+                (
+                    "No explicit account was configured; inferred username "
+                    f"'{inferred_username}' from a single [accounts] entry. "
+                    "Set [auth].username or INSPIRE_USERNAME to avoid ambiguity."
+                ),
+                ConfigDeprecationWarning,
+                stacklevel=3,
+            )
 
     _apply_account_catalog_layer(
         config_dict=config_dict,

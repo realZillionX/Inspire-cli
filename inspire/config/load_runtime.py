@@ -114,7 +114,7 @@ def _validate_required_config(
         raise ConfigError(
             "Missing target directory configuration.\n"
             "Set INSPIRE_TARGET_DIR env var or add to config.toml:\n"
-            "  [paths]\n"
+            "  [defaults]\n"
             "  target_dir = '/path/to/shared/directory'"
         )
 

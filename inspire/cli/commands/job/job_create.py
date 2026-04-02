@@ -14,13 +14,40 @@ from inspire.cli.context import (
     EXIT_VALIDATION_ERROR,
     pass_context,
 )
-from inspire.cli.formatters import human_formatter, json_formatter
+from inspire.cli.formatters import json_formatter
 from inspire.cli.utils import job_submit
 from inspire.cli.utils.auth import AuthManager, AuthenticationError
 from inspire.cli.utils.compute_group_autoselect import find_best_compute_group_location
+from inspire.cli.utils.common import json_option
 from inspire.cli.utils.errors import exit_with_error as _handle_error
+from inspire.cli.utils.notebook_cli import resolve_json_output
+from inspire.cli.utils.output import emit_info, emit_success
 from inspire.config import Config, ConfigError
 from inspire.config.workspaces import select_workspace_id
+
+
+def _complete_workspace(ctx, param, incomplete):
+    """Shell completion for workspace aliases."""
+    from inspire.cli.completion import get_workspace_alias_completions
+
+    aliases = get_workspace_alias_completions()
+    return [alias for alias in aliases if alias.startswith(incomplete)]
+
+
+def _complete_project(ctx, param, incomplete):
+    """Shell completion for project names."""
+    from inspire.cli.completion import get_project_name_completions
+
+    projects = get_project_name_completions()
+    return [comp for comp in projects if comp.value.startswith(incomplete)]
+
+
+def _complete_resource(ctx, param, incomplete):
+    """Shell completion for resource specs."""
+    from inspire.cli.completion import get_resource_spec_completions
+
+    specs = get_resource_spec_completions()
+    return [comp for comp in specs if comp.value.startswith(incomplete)]
 
 
 def run_job_create(
@@ -90,7 +117,8 @@ def run_job_create(
                 ctx,
                 "ConfigError",
                 "No workspace_id configured for GPU workloads. "
-                "Set [workspaces].gpu (or [workspaces].internet for 4090), "
+                'Set [accounts."<username>".workspaces].gpu '
+                '(or [accounts."<username>".workspaces].internet for 4090), '
                 "or pass --workspace/--workspace-id.",
                 EXIT_CONFIG_ERROR,
             )
@@ -120,10 +148,11 @@ def run_job_create(
                 if getattr(best, "selection_source", "") == "nodes" and getattr(
                     best, "free_nodes", 0
                 ):
-                    click.echo(
+                    emit_info(
+                        ctx,
                         "Auto-selected: "
                         f"{selected_group_name}, {best.free_nodes} full nodes free "
-                        f"({best.available_gpus} GPUs)"
+                        f"({best.available_gpus} GPUs)",
                     )
                 else:
                     preempt_note = (
@@ -131,9 +160,10 @@ def run_job_create(
                         if getattr(best, "low_priority_gpus", 0) > 0
                         else ""
                     )
-                    click.echo(
+                    emit_info(
+                        ctx,
                         f"Auto-selected: {selected_group_name}, "
-                        f"{best.available_gpus} GPUs available{preempt_note}"
+                        f"{best.available_gpus} GPUs available{preempt_note}",
                     )
 
         try:
@@ -155,9 +185,10 @@ def run_job_create(
                 max_priority = int(selected.priority_name)
                 if priority is not None and priority > max_priority:
                     if not ctx.json_output:
-                        click.echo(
+                        emit_info(
+                            ctx,
                             f"Capping priority {priority} → {max_priority} "
-                            f"(max for project '{selected.name}')"
+                            f"(max for project '{selected.name}')",
                         )
                     priority = max_priority
             except ValueError:
@@ -192,7 +223,7 @@ def run_job_create(
                     all_avail, requested_gpu_type.value
                 )
                 if summary:
-                    click.echo(summary)
+                    emit_info(ctx, summary)
             except Exception:
                 pass  # diagnostics are best-effort
 
@@ -231,7 +262,11 @@ def run_job_create(
             return
 
         if job_id:
-            click.echo(human_formatter.format_success(f"Job created: {job_id}"))
+            emit_success(
+                ctx,
+                payload={"job_id": job_id, "name": name, "status": "created"},
+                text=f"Job created: {job_id}",
+            )
             click.echo(f"\nName:     {name}")
             click.echo(f"Resource: {resource}")
             if nodes > 1:
@@ -251,11 +286,13 @@ def run_job_create(
 
         if isinstance(result, dict):
             message = result.get("message") or "Job created (no job ID returned)"
-            click.echo(human_formatter.format_success(message))
+            emit_success(ctx, payload=result, text=message)
             if result.get("data"):
                 click.echo(str(result["data"]))
         else:
-            click.echo(human_formatter.format_success("Job created (no job ID returned)"))
+            emit_success(
+                ctx, payload={"status": "created"}, text="Job created (no job ID returned)"
+            )
             click.echo(str(result))
 
     except ConfigError as e:
@@ -272,6 +309,7 @@ def run_job_create(
     "--resource",
     "-r",
     required=False,
+    shell_complete=_complete_resource,
     help="Resource spec (e.g., '4xH200') (default from config [job].resource or [defaults].resource)",
 )
 @click.option("--command", "-c", required=True, help="Start command")
@@ -284,7 +322,15 @@ def run_job_create(
 )
 @click.option("--max-time", type=float, default=100.0, help="Max runtime in hours (default: 100)")
 @click.option("--location", help="Preferred datacenter location")
-@click.option("--workspace", help="Workspace name (from [workspaces])")
+@click.option(
+    "--workspace",
+    shell_complete=_complete_workspace,
+    help=(
+        'Workspace alias or ID. Common aliases from [accounts."<username>".workspaces] config: '
+        "'cpu' (CPU workloads), 'gpu' (H100/H200), 'internet' (RTX 4090 with internet). "
+        "Use --workspace-id for explicit UUID."
+    ),
+)
 @click.option(
     "--workspace-id",
     "workspace_id_override",
@@ -303,6 +349,7 @@ def run_job_create(
 @click.option(
     "--project",
     "-p",
+    shell_complete=_complete_project,
     default=None,
     help="Project name or ID (default from config [job].project_id or [defaults].project_order)",
 )
@@ -317,6 +364,7 @@ def run_job_create(
     default=None,
     help="Auto-restart on failure/preemption (auto-enabled for low-priority projects)",
 )
+@json_option
 @pass_context
 def create(
     ctx: Context,
@@ -334,7 +382,9 @@ def create(
     project: Optional[str],
     nodes: int,
     fault_tolerant: Optional[bool],
+    json_output: bool = False,
 ) -> None:
+    json_output = resolve_json_output(ctx, json_output)
     """Create a new training job.
 
     IMPORTANT: Always set INSPIRE_TARGET_DIR before running this command (from your laptop).

@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
-from inspire.config.models import SOURCE_GLOBAL, SOURCE_PROJECT, Config, ConfigError
+from inspire.config.models import (
+    SOURCE_GLOBAL,
+    SOURCE_PROJECT,
+    Config,
+    ConfigDeprecationWarning,
+    ConfigError,
+)
 from inspire.config.toml import (
     _find_project_config,
     _flatten_toml,
@@ -20,6 +27,43 @@ from .load_common import (
     _apply_defaults_overrides,
     _parse_alias_map,
 )
+
+
+def _apply_legacy_paths_target_dir(
+    *,
+    raw_data: dict[str, Any],
+    config_dict: dict[str, Any],
+    sources: dict[str, str],
+    source_name: str,
+    config_path: Path | None,
+) -> None:
+    """Handle legacy paths.target_dir with fallback to defaults.target_dir."""
+    # Check if defaults.target_dir is already set
+    if config_dict.get("target_dir"):
+        return
+
+    # Check for legacy paths.target_dir
+    paths_section = raw_data.get("paths")
+    if not isinstance(paths_section, dict):
+        return
+
+    legacy_value = paths_section.get("target_dir")
+    if legacy_value is None or legacy_value == "":
+        return
+
+    # Apply the legacy value
+    config_dict["target_dir"] = str(legacy_value)
+    sources["target_dir"] = source_name
+
+    # Emit deprecation warning
+    path_label = str(config_path) if config_path else f"{source_name} config"
+    warnings.warn(
+        f"{path_label} uses deprecated [paths].target_dir. "
+        f"Use [defaults].target_dir instead. "
+        f"The legacy key still works but will be removed in a future release.",
+        ConfigDeprecationWarning,
+        stacklevel=4,
+    )
 
 
 def _apply_legacy_workspace_id_section(
@@ -61,16 +105,17 @@ def _apply_global_layer(
     global_accounts, global_account_catalogs = _parse_global_accounts(
         global_raw.pop("accounts", {})
     )
+    global_workspace_specs = global_raw.pop("workspace_specs", {})
+    global_workspace_names = global_raw.pop("workspace_names", {})
 
     global_defaults: dict[str, Any] = {}
     raw_global_defaults = global_raw.pop("defaults", {})
     if isinstance(raw_global_defaults, dict):
         global_defaults = raw_global_defaults
 
-    global_workspaces: dict[str, str] = {}
-    raw_workspaces = global_raw.get("workspaces") or {}
-    if isinstance(raw_workspaces, dict):
-        global_workspaces = {str(k): str(v) for k, v in raw_workspaces.items()}
+    # Workspace aliases are account-scoped. Ignore legacy shared [workspaces]
+    # during effective config loading.
+    global_raw.pop("workspaces", None)
 
     flat_global = _flatten_toml(global_raw)
     for toml_key, value in flat_global.items():
@@ -86,12 +131,15 @@ def _apply_global_layer(
     if global_remote_env:
         config_dict["remote_env"] = global_remote_env
         sources["remote_env"] = SOURCE_GLOBAL
-    if global_workspaces:
-        config_dict["workspaces"] = global_workspaces
-        sources["workspaces"] = SOURCE_GLOBAL
     if global_accounts:
         config_dict["accounts"] = global_accounts
         sources["accounts"] = SOURCE_GLOBAL
+    if global_workspace_specs:
+        config_dict["workspace_specs"] = global_workspace_specs
+        sources["workspace_specs"] = SOURCE_GLOBAL
+    if global_workspace_names:
+        config_dict["workspace_names"] = global_workspace_names
+        sources["workspace_names"] = SOURCE_GLOBAL
 
     _apply_legacy_workspace_id_section(
         raw_data=global_raw,
@@ -106,6 +154,15 @@ def _apply_global_layer(
         sources=sources,
         source_name=SOURCE_GLOBAL,
     )
+
+    _apply_legacy_paths_target_dir(
+        raw_data=global_raw,
+        config_dict=config_dict,
+        sources=sources,
+        source_name=SOURCE_GLOBAL,
+        config_path=global_config_path,
+    )
+
     return global_config_path, global_account_catalogs
 
 
@@ -154,10 +211,9 @@ def _apply_project_layer(
     layer_state.project_accounts = project_accounts
     layer_state.project_account_catalogs = project_account_catalogs
 
-    project_workspaces: dict[str, str] = {}
-    raw_workspaces = project_raw.get("workspaces") or {}
-    if isinstance(raw_workspaces, dict):
-        project_workspaces = {str(k): str(v) for k, v in raw_workspaces.items()}
+    # Workspace aliases are account-scoped. Ignore legacy shared [workspaces]
+    # during effective config loading.
+    project_raw.pop("workspaces", None)
 
     flat_project = _flatten_toml(project_raw)
     for toml_key, value in flat_project.items():
@@ -175,11 +231,6 @@ def _apply_project_layer(
         merged_remote_env.update(project_remote_env)
         config_dict["remote_env"] = merged_remote_env
         sources["remote_env"] = SOURCE_PROJECT
-    if project_workspaces:
-        merged_workspaces = dict(config_dict.get("workspaces", {}))
-        merged_workspaces.update(project_workspaces)
-        config_dict["workspaces"] = merged_workspaces
-        sources["workspaces"] = SOURCE_PROJECT
     if project_accounts:
         merged_accounts = dict(config_dict.get("accounts", {}))
         merged_accounts.update(project_accounts)
@@ -191,6 +242,14 @@ def _apply_project_layer(
         config_dict=config_dict,
         sources=sources,
         source_name=SOURCE_PROJECT,
+    )
+
+    _apply_legacy_paths_target_dir(
+        raw_data=project_raw,
+        config_dict=config_dict,
+        sources=sources,
+        source_name=SOURCE_PROJECT,
+        config_path=project_config_path,
     )
 
     return layer_state

@@ -16,7 +16,9 @@ from inspire.bridge.tunnel import (
     load_tunnel_config,
 )
 from inspire.cli.context import Context, EXIT_CONFIG_ERROR, EXIT_GENERAL_ERROR, pass_context
+from inspire.cli.utils.common import json_option
 from inspire.cli.utils.errors import exit_with_error as _handle_error
+from inspire.cli.utils.notebook_cli import resolve_json_output
 from inspire.cli.utils.notebook_cli import require_web_session
 from inspire.cli.utils.tunnel_reconnect import (
     load_ssh_public_key_material,
@@ -34,8 +36,10 @@ _RUNNING_NOTEBOOK_STATUS = "RUNNING"
 
 @click.command("ssh")
 @click.option("--bridge", "-b", help="Bridge profile to connect")
+@json_option
 @pass_context
-def bridge_ssh(ctx: Context, bridge: Optional[str]) -> None:
+def bridge_ssh(ctx: Context, bridge: Optional[str], json_output: bool = False) -> None:
+    json_output = resolve_json_output(ctx, json_output)
     """Open an interactive SSH shell to Bridge.
 
     Requires a configured bridge profile with a reachable SSH tunnel.

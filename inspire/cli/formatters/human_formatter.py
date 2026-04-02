@@ -5,7 +5,6 @@ Provides compact plain-text output for terminal and agent use.
 
 from __future__ import annotations
 
-import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -53,11 +52,6 @@ def format_warning(message: str) -> str:
         Formatted warning string
     """
     return f"Warning: {message}"
-
-
-def print_error(message: str, hint: Optional[str] = None) -> None:
-    """Print an error message to stderr."""
-    print(format_error(message, hint), file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------

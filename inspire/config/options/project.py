@@ -6,6 +6,15 @@ from inspire.config.schema_models import ConfigOption, _parse_int, _parse_list
 
 DEFAULTS_OPTIONS: list[ConfigOption] = [
     ConfigOption(
+        env_var="INSPIRE_TARGET_DIR",
+        toml_key="defaults.target_dir",
+        field_name="target_dir",
+        description="Default target directory on Bridge shared filesystem",
+        default=None,
+        category="Defaults",
+        scope="project",
+    ),
+    ConfigOption(
         env_var="INSPIRE_DEFAULT_RESOURCE",
         toml_key="defaults.resource",
         field_name="default_resource",

@@ -94,7 +94,7 @@ def test_bridge_scp_upload_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     result = runner.invoke(cli_main, ["bridge", "scp", str(local_file), "/tmp/test.txt"])
 
     assert result.exit_code == EXIT_SUCCESS
-    assert result.output.strip() == "OK"
+    assert result.output.strip().startswith("OK")
 
 
 def test_bridge_scp_download_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -119,7 +119,7 @@ def test_bridge_scp_download_success(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     )
 
     assert result.exit_code == EXIT_SUCCESS
-    assert result.output.strip() == "OK"
+    assert result.output.strip().startswith("OK")
 
 
 def test_bridge_scp_recursive_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

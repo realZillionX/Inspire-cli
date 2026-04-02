@@ -26,11 +26,14 @@ from inspire.cli.context import (
     EXIT_VALIDATION_ERROR,
     pass_context,
 )
-from inspire.cli.formatters import human_formatter, json_formatter
+from inspire.cli.formatters import json_formatter
 from inspire.cli.utils import job_submit
 from inspire.cli.utils.auth import AuthManager, AuthenticationError
+from inspire.cli.utils.common import json_option
 from inspire.cli.utils.compute_group_autoselect import find_best_compute_group_location
 from inspire.cli.utils.errors import exit_with_error as _handle_error
+from inspire.cli.utils.notebook_cli import resolve_json_output
+from inspire.cli.utils.output import emit_error, emit_info, emit_success
 from inspire.config import Config, ConfigError
 from inspire.config.workspaces import select_workspace_id
 
@@ -85,7 +88,7 @@ def _run_sync_if_requested(ctx: Context, *, sync: bool, watch: bool) -> None:
         return
 
     if ctx.debug and not ctx.json_output:
-        click.echo("Syncing code...")
+        emit_info(ctx, "Syncing code...")
 
     if _check_uncommitted_changes():
         _handle_error(
@@ -139,15 +142,15 @@ def _resolve_run_resource_and_location(
                 )
             )
         else:
-            click.echo(
-                human_formatter.format_error(
-                    f"No compute groups with at least {gpus} {gpu_type} GPUs available",
-                    hint=(
-                        "Try different GPU type or fewer GPUs. Run 'inspire resources list' "
-                        "to see availability."
-                    ),
+            emit_error(
+                ctx,
+                error_type="InsufficientResources",
+                message=f"No compute groups with at least {gpus} {gpu_type} GPUs available",
+                exit_code=EXIT_VALIDATION_ERROR,
+                hint=(
+                    "Try different GPU type or fewer GPUs. Run 'inspire resources list' "
+                    "to see availability."
                 ),
-                err=True,
             )
         sys.exit(EXIT_VALIDATION_ERROR)
 
@@ -156,10 +159,11 @@ def _resolve_run_resource_and_location(
 
     if ctx.debug and not ctx.json_output:
         if getattr(best, "selection_source", "") == "nodes" and getattr(best, "free_nodes", 0):
-            click.echo(
+            emit_info(
+                ctx,
                 "Auto-selected: "
                 f"{selected_group_name}, {best.free_nodes} full nodes free "
-                f"({best.available_gpus} GPUs)"
+                f"({best.available_gpus} GPUs)",
             )
         else:
             preempt_note = (
@@ -167,9 +171,10 @@ def _resolve_run_resource_and_location(
                 if getattr(best, "low_priority_gpus", 0) > 0
                 else ""
             )
-            click.echo(
+            emit_info(
+                ctx,
                 f"Auto-selected: {selected_group_name}, "
-                f"{best.available_gpus} GPUs available{preempt_note}"
+                f"{best.available_gpus} GPUs available{preempt_note}",
             )
 
     return resource_str, location
@@ -222,7 +227,8 @@ def _run_flow(
                 ctx,
                 "ConfigError",
                 "No workspace_id configured for GPU workloads. "
-                "Set [workspaces].gpu (or [workspaces].internet for 4090), "
+                'Set [accounts."<username>".workspaces].gpu '
+                '(or [accounts."<username>".workspaces].internet for 4090), '
                 "or pass --workspace/--workspace-id.",
                 EXIT_CONFIG_ERROR,
             )
@@ -276,8 +282,7 @@ def _run_flow(
                 )
             elif ctx.debug:
                 click.echo(
-                    f"Using project: "
-                    f"{selected_project.name}{selected_project.get_quota_status()}"
+                    f"Using project: {selected_project.name}{selected_project.get_quota_status()}"
                 )
 
         # Show compute-group availability diagnostics
@@ -328,42 +333,50 @@ def _run_flow(
             else:
                 if isinstance(result, dict):
                     message = result.get("message") or "Job created (no job ID returned)"
-                    click.echo(human_formatter.format_success(message))
+                    emit_success(ctx, payload=result, text=message)
                     if result.get("data") and ctx.debug:
-                        click.echo(str(result["data"]))
+                        emit_info(ctx, str(result["data"]))
                 else:
-                    click.echo(human_formatter.format_success("Job created"))
+                    emit_success(ctx, payload={"status": "created"}, text="Job created")
                     if ctx.debug:
-                        click.echo(str(result))
+                        emit_info(ctx, str(result))
             sys.exit(EXIT_SUCCESS)
 
         if ctx.json_output:
             click.echo(json_formatter.format_json(data))
         else:
-            click.echo(f"Job created: {job_id}")
+            emit_success(
+                ctx, payload={"job_id": job_id, "status": "created"}, text=f"Job created: {job_id}"
+            )
             if ctx.debug:
-                click.echo(f"Name: {name}")
-                click.echo(f"Resource: {resource_str}")
+                emit_info(ctx, f"Name: {name}")
+                emit_info(ctx, f"Resource: {resource_str}")
                 if nodes > 1:
-                    click.echo(f"Nodes: {nodes}")
-                click.echo(
-                    f"Command: {wrapped_command[:80]}{'...' if len(wrapped_command) > 80 else ''}"
+                    emit_info(ctx, f"Nodes: {nodes}")
+                emit_info(
+                    ctx,
+                    f"Command: {wrapped_command[:80]}{'...' if len(wrapped_command) > 80 else ''}",
                 )
                 if log_path:
-                    click.echo(f"Log file: {log_path}")
-                click.echo(f"Check status with: inspire job status {job_id}")
+                    emit_info(ctx, f"Log file: {log_path}")
+                emit_info(ctx, f"Check status with: inspire job status {job_id}")
 
         if watch:
             if ctx.json_output:
                 sys.exit(EXIT_SUCCESS)
 
             if ctx.debug:
-                click.echo("Following logs...")
+                emit_info(ctx, "Following logs...")
             try:
                 _exec_inspire_subcommand(["job", "logs", job_id, "--follow"])
             except Exception as e:
-                click.echo(f"Failed to start log follow: {e}", err=True)
-                click.echo(f"You can still run: inspire job logs {job_id} --follow")
+                emit_error(
+                    ctx,
+                    error_type="LogFollowError",
+                    message=f"Failed to start log follow: {e}",
+                    exit_code=EXIT_GENERAL_ERROR,
+                    hint=f"You can still run: inspire job logs {job_id} --follow",
+                )
                 sys.exit(EXIT_GENERAL_ERROR)
 
         sys.exit(EXIT_SUCCESS)
@@ -402,7 +415,14 @@ def _run_flow(
     help="Project name or ID (default from config [job].project_id or [defaults].project_order)",
 )
 @click.option("--location", help="Preferred datacenter location (overrides auto-selection)")
-@click.option("--workspace", help="Workspace name (from [workspaces])")
+@click.option(
+    "--workspace",
+    help=(
+        'Workspace alias or ID. Common aliases from [accounts."<username>".workspaces] config: '
+        "'cpu' (CPU workloads), 'gpu' (H100/H200), 'internet' (RTX 4090 with internet). "
+        "Use --workspace-id for explicit UUID."
+    ),
+)
 @click.option(
     "--workspace-id",
     "workspace_id_override",
@@ -422,6 +442,7 @@ def _run_flow(
     default=None,
     help="Auto-restart on failure/preemption (auto-enabled for low-priority projects)",
 )
+@json_option
 @pass_context
 def run(
     ctx: Context,
@@ -440,7 +461,9 @@ def run(
     image: str | None,
     nodes: int,
     fault_tolerant: bool | None,
+    json_output: bool = False,
 ) -> None:
+    json_output = resolve_json_output(ctx, json_output)
     """Quick job submission with smart resource allocation.
 
     Automatically selects the compute group with most available capacity.

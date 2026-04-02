@@ -22,6 +22,7 @@ class SshRuntimeConfig:
     rtunnel_download_url: str = DEFAULT_RTUNNEL_DOWNLOAD_URL
     apt_mirror_url: Optional[str] = None
     rtunnel_upload_policy: str = "auto"
+    ssh_port: int = 22222
 
 
 def resolve_ssh_runtime_config(
@@ -71,6 +72,7 @@ def resolve_ssh_runtime_config(
         rtunnel_download_url=download_url,
         apt_mirror_url=values["apt_mirror_url"],
         rtunnel_upload_policy=upload_policy,
+        ssh_port=getattr(config, "ssh_port", 22222),
     )
 
 

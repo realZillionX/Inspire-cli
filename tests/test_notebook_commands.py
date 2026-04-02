@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 import pytest
@@ -7,6 +8,7 @@ from click.testing import CliRunner
 from inspire import config as config_module
 from inspire.bridge import tunnel as tunnel_module
 from inspire.cli.commands.notebook import notebook_commands as notebook_cmd_module
+from inspire.cli.commands.notebook import notebook_create_flow as notebook_create_flow_module
 from inspire.cli.commands.notebook import notebook_ssh_flow as ssh_flow_module
 from inspire.cli.context import Context, EXIT_API_ERROR, EXIT_CONFIG_ERROR, EXIT_SUCCESS
 from inspire.cli.main import main as cli_main
@@ -76,6 +78,63 @@ def test_notebook_create_rejects_priority_11(monkeypatch: pytest.MonkeyPatch) ->
     assert called is False
 
 
+def test_resolve_notebook_compute_group_bypasses_auto_select_with_explicit_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_auto_select(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("_auto_select_compute_group should not be called")
+
+    monkeypatch.setattr(
+        notebook_create_flow_module,
+        "_auto_select_compute_group",
+        fail_auto_select,
+    )
+    monkeypatch.setattr(
+        browser_api_module,
+        "list_notebook_compute_groups",
+        lambda workspace_id, session=None: [
+            {
+                "logic_compute_group_id": "lcg-4090-cuda128",
+                "name": "4090-cuda12.8",
+                "compute_group_name": "GPU4090资源组",
+                "gpu_type_stats": [],
+                "workspace_ids": ["ws-test"],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        browser_api_module,
+        "get_resource_prices",
+        lambda workspace_id, logic_compute_group_id, session=None: [
+            {
+                "gpu_count": 1,
+                "quota_id": "quota-4090",
+                "gpu_info": {"gpu_type": "NVIDIA_RTX_4090"},
+            }
+        ],
+    )
+
+    result = notebook_create_flow_module.resolve_notebook_compute_group(
+        Context(),
+        session=SimpleNamespace(),
+        workspace_id="ws-test",
+        gpu_count=1,
+        gpu_pattern="4090",
+        requested_cpu_count=None,
+        auto=True,
+        json_output=True,
+        compute_group_name="4090-cuda12.8",
+    )
+
+    assert result == (
+        "lcg-4090-cuda128",
+        "NVIDIA_RTX_4090",
+        "4090",
+        "1x4090",
+        "4090-cuda12.8",
+    )
+
+
 def test_notebook_create_accepts_post_start_command(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -91,6 +150,25 @@ def test_notebook_create_accepts_post_start_command(monkeypatch: pytest.MonkeyPa
     assert result.exit_code == EXIT_SUCCESS
     assert captured["post_start"] == "echo hi"
     assert captured["post_start_script"] is None
+
+
+def test_notebook_create_accepts_compute_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_notebook_create(ctx: Context, **kwargs: Any) -> None:
+        assert ctx is not None
+        captured.update(kwargs)
+
+    monkeypatch.setattr(notebook_cmd_module, "run_notebook_create", fake_run_notebook_create)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        ["notebook", "create", "--compute-group", "4090-cuda12.8"],
+    )
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert captured["compute_group_name"] == "4090-cuda12.8"
 
 
 def test_notebook_create_rejects_post_start_and_script_together(
@@ -535,6 +613,11 @@ def test_run_notebook_ssh_validates_dropbear_setup_script(
     monkeypatch.setattr(ssh_flow_module, "load_ssh_public_key", lambda pubkey: "ssh-ed25519 AAA")
     monkeypatch.setattr(
         ssh_flow_module,
+        "resolve_ssh_identity_file",
+        lambda pubkey: tmp_path / "id_ed25519",
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
         "resolve_ssh_runtime_config",
         lambda cli_overrides=None: SshRuntimeConfig(
             dropbear_deb_dir="/project/dropbear",
@@ -700,6 +783,11 @@ def test_run_notebook_ssh_passes_resolved_runtime_to_setup(
     monkeypatch.setattr(ssh_flow_module, "load_ssh_public_key", lambda pubkey: "ssh-ed25519 AAA")
     monkeypatch.setattr(
         ssh_flow_module,
+        "resolve_ssh_identity_file",
+        lambda pubkey: tmp_path / "id_ed25519",
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
         "resolve_ssh_runtime_config",
         lambda cli_overrides=None: resolved_runtime,
     )
@@ -806,6 +894,11 @@ def test_run_notebook_ssh_refreshes_saved_profile_on_notebook_mismatch(
     monkeypatch.setattr(ssh_flow_module, "load_ssh_public_key", lambda pubkey: "ssh-ed25519 AAA")
     monkeypatch.setattr(
         ssh_flow_module,
+        "resolve_ssh_identity_file",
+        lambda pubkey: tmp_path / "id_ed25519",
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
         "resolve_ssh_runtime_config",
         lambda cli_overrides=None: SshRuntimeConfig(),
     )
@@ -829,9 +922,6 @@ def test_run_notebook_ssh_refreshes_saved_profile_on_notebook_mismatch(
         tunnel_module,
         "get_ssh_command_args",
         lambda bridge_name, config, remote_command=None: ["ssh", "root@localhost"],
-    )
-    monkeypatch.setattr(
-        ssh_flow_module, "resolve_ssh_identity_file", lambda pubkey: tmp_path / "id_ed25519"
     )
 
     monkeypatch.setattr(ssh_flow_module.subprocess, "call", lambda args: 0)
@@ -913,6 +1003,11 @@ def test_run_notebook_ssh_interactive_reconnects_after_drop(
         lambda current_user, notebook_detail: (True, ""),
     )
     monkeypatch.setattr(ssh_flow_module, "load_ssh_public_key", lambda pubkey: "ssh-ed25519 AAA")
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "resolve_ssh_identity_file",
+        lambda pubkey: tmp_path / "id_ed25519",
+    )
     monkeypatch.setattr(
         ssh_flow_module,
         "resolve_ssh_runtime_config",
@@ -1023,6 +1118,11 @@ def test_run_notebook_ssh_reports_when_tunnel_not_ready(
         lambda current_user, notebook_detail: (True, ""),
     )
     monkeypatch.setattr(ssh_flow_module, "load_ssh_public_key", lambda pubkey: "ssh-ed25519 AAA")
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "resolve_ssh_identity_file",
+        lambda pubkey: tmp_path / "id_ed25519",
+    )
     monkeypatch.setattr(
         ssh_flow_module,
         "resolve_ssh_runtime_config",
@@ -1211,6 +1311,11 @@ def test_run_notebook_ssh_passes_upload_policy_override(
     monkeypatch.setattr(ssh_flow_module, "load_ssh_public_key", lambda pubkey: "ssh-ed25519 AAA")
     monkeypatch.setattr(
         ssh_flow_module,
+        "resolve_ssh_identity_file",
+        lambda pubkey: tmp_path / "id_ed25519",
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
         "resolve_ssh_runtime_config",
         fake_resolve_ssh_runtime_config,
     )
@@ -1254,7 +1359,7 @@ def test_run_notebook_ssh_passes_upload_policy_override(
     monkeypatch.setattr(
         tunnel_module_local,
         "get_ssh_command_args",
-        lambda bridge_name, config, remote_command=None: ["ssh", "root@localhost"],
+        lambda bridge_name, config, remote_command=None: ["bash", "-lc", "echo ok"],
     )
     monkeypatch.setattr(ssh_flow_module.subprocess, "call", lambda args: 0)
     exec_call: dict[str, Any] = {}
@@ -1282,6 +1387,113 @@ def test_run_notebook_ssh_passes_upload_policy_override(
     )
 
     assert captured_overrides.get("rtunnel_upload_policy") == "never"
-    assert exec_call["file"] == "ssh"
+    assert exec_call["file"] == "bash"
+    assert exec_call["args"] == ["bash", "-lc", "echo ok"]
+    assert exec_call["env"]["LC_ALL"] == "C"
+    assert exec_call["env"]["LANG"] == "C"
+
+
+def test_run_notebook_ssh_cached_fast_path_execs_using_returned_program(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeSession:
+        workspace_id = "ws-test"
+        storage_state = {}
+
+    class FakeTunnelConfig:
+        def __init__(self) -> None:
+            self.bridges: dict[str, object] = {}
+            self.default_bridge = None
+
+        def add_bridge(self, profile: object) -> None:
+            name = str(getattr(profile, "name", "default"))
+            self.bridges[name] = profile
+            if self.default_bridge is None:
+                self.default_bridge = name
+
+        def get_bridge(self, name: Optional[str] = None) -> object | None:
+            if name:
+                return self.bridges.get(name)
+            if self.default_bridge:
+                return self.bridges.get(self.default_bridge)
+            return None
+
+    fake_tunnel_config = FakeTunnelConfig()
+    fake_tunnel_config.add_bridge(
+        tunnel_module.BridgeProfile(
+            name="notebook-notebook",
+            proxy_url="wss://proxy.example/notebook/",
+            notebook_id="notebook-12345678",
+        )
+    )
+
+    monkeypatch.setattr(ssh_flow_module, "require_web_session", lambda ctx, hint: FakeSession())
+    monkeypatch.setattr(ssh_flow_module, "load_config", lambda ctx: make_test_config(tmp_path))
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_resolve_notebook_id",
+        lambda *args, **kwargs: ("notebook-12345678", None),
+    )
+    monkeypatch.setattr(
+        browser_api_module,
+        "wait_for_notebook_running",
+        lambda notebook_id, session=None: {
+            "resource_spec_price": {"gpu_info": {"gpu_product_simple": "CPU"}}
+        },
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_get_current_user_detail",
+        lambda session, base_url: {"id": "user-1", "username": "user"},
+    )
+    monkeypatch.setattr(
+        ssh_flow_module,
+        "_validate_notebook_account_access",
+        lambda current_user, notebook_detail: (True, ""),
+    )
+    monkeypatch.setattr(
+        tunnel_module,
+        "load_tunnel_config",
+        lambda account=None: fake_tunnel_config,
+    )
+    monkeypatch.setattr(
+        tunnel_module,
+        "get_ssh_command_args",
+        lambda bridge_name, config, remote_command=None: ["bash", "-lc", "echo ok"],
+    )
+    monkeypatch.setattr(
+        ssh_flow_module.subprocess,
+        "run",
+        lambda *args, **kwargs: __import__("subprocess").CompletedProcess(
+            args[0], 0, stdout="ok\n", stderr=""
+        ),
+    )
+
+    exec_call: dict[str, Any] = {}
+
+    def fake_execvpe(file: str, args: list[str], env: dict[str, str]) -> None:
+        exec_call["file"] = file
+        exec_call["args"] = args
+        exec_call["env"] = env
+
+    monkeypatch.setattr(ssh_flow_module.os, "execvpe", fake_execvpe)
+
+    ssh_flow_module.run_notebook_ssh(
+        Context(),
+        notebook_id="nb-name",
+        wait=True,
+        pubkey=None,
+        save_as=None,
+        port=31337,
+        ssh_port=22222,
+        command="echo test",
+        rtunnel_bin=None,
+        rtunnel_upload_policy="never",
+        debug_playwright=False,
+        setup_timeout=60,
+    )
+
+    assert exec_call["file"] == "bash"
+    assert exec_call["args"] == ["bash", "-lc", "echo ok"]
     assert exec_call["env"]["LC_ALL"] == "C"
     assert exec_call["env"]["LANG"] == "C"

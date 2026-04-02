@@ -117,7 +117,7 @@ def _rtunnel_matches_on_notebook(
     base = _jupyter_server_base(lab_url)
     binary_url = f"{base}api/contents/{_CONTENTS_API_RTUNNEL_FILENAME}?content=0"
     sidecar_url = (
-        f"{base}api/contents/{_CONTENTS_API_RTUNNEL_FILENAME}.sha256" f"?format=base64&content=1"
+        f"{base}api/contents/{_CONTENTS_API_RTUNNEL_FILENAME}.sha256?format=base64&content=1"
     )
 
     try:
@@ -221,8 +221,6 @@ def _resolve_rtunnel_binary(
     setup script will copy from the shared path) or when all upload attempts
     fail.
     """
-    import sys as _sys
-
     local_rtunnel = Path.home() / ".local" / "bin" / "rtunnel"
     local_exists = local_rtunnel.is_file()
     _log.debug("Local rtunnel path: %s (exists=%s)", local_rtunnel, local_exists)
@@ -231,11 +229,11 @@ def _resolve_rtunnel_binary(
     policy = ssh_runtime.rtunnel_upload_policy if ssh_runtime else "auto"
 
     if rtunnel_bin_configured:
-        _sys.stderr.write(f"  Using configured rtunnel path: {ssh_runtime.rtunnel_bin}\n")
+        _log.info("  Using configured rtunnel path: %s", ssh_runtime.rtunnel_bin)
         trace_event("rtunnel_bin_configured", rtunnel_bin=ssh_runtime.rtunnel_bin)
 
     if policy == "never":
-        _sys.stderr.write("  Upload policy: never — skipping Contents API upload.\n")
+        _log.debug("  Upload policy: never — skipping Contents API upload.")
         update_trace_summary(upload_policy=policy)
         trace_event("rtunnel_upload_skipped", policy=policy)
         return None
@@ -252,7 +250,7 @@ def _resolve_rtunnel_binary(
     # -- "always", or "auto" without rtunnel_bin: download + upload -----------
 
     if policy == "always" and rtunnel_bin_configured:
-        _sys.stderr.write("  Upload policy: always — preparing Contents API fallback.\n")
+        _log.debug("  Upload policy: always — preparing Contents API fallback.")
         trace_event("rtunnel_upload_policy_forced", policy=policy)
 
     if not local_exists:
@@ -260,33 +258,31 @@ def _resolve_rtunnel_binary(
             ssh_runtime.rtunnel_download_url if ssh_runtime else DEFAULT_RTUNNEL_DOWNLOAD_URL
         )
         if _download_rtunnel_locally(download_url, local_rtunnel):
-            _sys.stderr.write("  Downloaded rtunnel binary locally.\n")
+            _log.debug("  Downloaded rtunnel binary locally.")
             trace_event("rtunnel_local_downloaded", download_url=download_url)
         else:
-            _sys.stderr.write("  WARNING: Failed to download rtunnel binary locally.\n")
+            _log.warning("  Failed to download rtunnel binary locally.")
             trace_event("rtunnel_local_download_failed", download_url=download_url)
 
     if local_rtunnel.is_file():
         _log.debug("Local rtunnel binary: %d bytes", local_rtunnel.stat().st_size)
         local_hash = _compute_rtunnel_hash(local_rtunnel)
         if local_hash and _rtunnel_matches_on_notebook(context, lab_url, local_hash):
-            _sys.stderr.write("  rtunnel binary already on notebook (skipping upload).\n")
+            _log.debug("  rtunnel binary already on notebook (skipping upload).")
             trace_event("rtunnel_upload_already_present", policy=policy)
             return _CONTENTS_API_RTUNNEL_FILENAME
         elif _upload_rtunnel_via_contents_api(context, lab_url, local_rtunnel):
             if local_hash:
                 _upload_rtunnel_hash_sidecar(context, lab_url, local_hash)
-            _sys.stderr.write("  Uploaded rtunnel binary via Jupyter Contents API.\n")
+            _log.info("  Uploaded rtunnel binary via Jupyter Contents API.")
             trace_event("rtunnel_contents_upload_success", policy=policy)
             return _CONTENTS_API_RTUNNEL_FILENAME
         else:
-            _sys.stderr.write(
-                "  WARNING: Failed to upload rtunnel binary via Jupyter Contents API.\n"
-            )
+            _log.warning("  Failed to upload rtunnel binary via Jupyter Contents API.")
             trace_event("rtunnel_contents_upload_failed", policy=policy)
 
     else:
-        _sys.stderr.write(f"  WARNING: rtunnel binary not found at {local_rtunnel}\n")
+        _log.warning("  rtunnel binary not found at %s", local_rtunnel)
         trace_event("rtunnel_local_binary_missing", path=local_rtunnel)
 
     return None

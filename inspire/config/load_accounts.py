@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from inspire.config.models import SOURCE_GLOBAL, SOURCE_PROJECT
@@ -150,11 +149,7 @@ def _apply_account_catalog_layer(
     global_account_catalogs: dict[str, dict[str, Any]],
     project_account_catalogs: dict[str, dict[str, Any]],
 ) -> None:
-    selected_account = (
-        str(config_dict.get("username") or "").strip()
-        or context_account
-        or str(os.getenv("INSPIRE_USERNAME") or "").strip()
-    )
+    selected_account = str(config_dict.get("username") or "").strip() or context_account
     merged_account_catalogs = _merge_account_catalogs(
         global_account_catalogs, project_account_catalogs
     )
@@ -187,12 +182,11 @@ def _apply_account_catalog_layer(
             sources[field_name] = account_catalog_source
 
     if account_workspaces:
-        merged_workspaces = dict(account_workspaces)
-        merged_workspaces.update(config_dict.get("workspaces", {}))
-        config_dict["workspaces"] = merged_workspaces
+        config_dict["workspaces"] = dict(account_workspaces)
         if sources.get("workspaces") not in {SOURCE_PROJECT, SOURCE_GLOBAL}:
             sources["workspaces"] = account_catalog_source
 
+        merged_workspaces = config_dict["workspaces"]
         if not config_dict.get("workspace_cpu_id") and merged_workspaces.get("cpu"):
             config_dict["workspace_cpu_id"] = merged_workspaces["cpu"]
             sources["workspace_cpu_id"] = account_catalog_source

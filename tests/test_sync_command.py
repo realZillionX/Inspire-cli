@@ -127,93 +127,12 @@ def test_sync_ssh_preflight_happens_before_push(
     assert push_called["value"] is False
 
 
-def test_sync_workflow_preflight_happens_before_push(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    config = make_sync_config(tmp_path)
-    push_called = {"value": False}
-
-    monkeypatch.setattr(
-        Config,
-        "from_files_and_env",
-        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
-    )
-    _patch_common_git_helpers(monkeypatch)
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "push_to_remote",
-        lambda *args, **kwargs: push_called.update(value=True),
-    )
-
+def test_sync_rejects_removed_transport_option() -> None:
     runner = CliRunner()
     result = runner.invoke(cli_main, ["sync", "--transport", "workflow"])
 
-    assert result.exit_code == EXIT_CONFIG_ERROR
-    assert push_called["value"] is False
-
-
-def test_sync_workflow_rejects_remote_source_before_preflight(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    config = make_sync_config(tmp_path)
-    preflight_called = {"value": False}
-    push_called = {"value": False}
-
-    monkeypatch.setattr(
-        Config,
-        "from_files_and_env",
-        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
-    )
-    monkeypatch.setattr(sync_cmd_module, "get_current_branch", lambda: "main")
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "_preflight_workflow_transport",
-        lambda *_args, **_kwargs: preflight_called.update(value=True),
-    )
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "push_to_remote",
-        lambda *args, **kwargs: push_called.update(value=True),
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(cli_main, ["sync", "--transport", "workflow", "--source", "remote"])
-
-    assert result.exit_code == EXIT_CONFIG_ERROR
-    assert "--source remote is only supported" in result.output
-    assert preflight_called["value"] is False
-    assert push_called["value"] is False
-
-
-def test_sync_force_requires_ssh_transport(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    config = make_sync_config(tmp_path)
-    preflight_called = {"value": False}
-    push_called = {"value": False}
-
-    monkeypatch.setattr(
-        Config,
-        "from_files_and_env",
-        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
-    )
-    monkeypatch.setattr(sync_cmd_module, "get_current_branch", lambda: "main")
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "_preflight_workflow_transport",
-        lambda *_args, **_kwargs: preflight_called.update(value=True),
-    )
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "push_to_remote",
-        lambda *args, **kwargs: push_called.update(value=True),
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(cli_main, ["sync", "--transport", "workflow", "--force"])
-
-    assert result.exit_code == EXIT_CONFIG_ERROR
-    assert "--force is only supported" in result.output
-    assert preflight_called["value"] is False
-    assert push_called["value"] is False
+    assert result.exit_code != EXIT_SUCCESS
+    assert "No such option: --transport" in result.output
 
 
 def test_sync_ssh_passes_remote_to_tunnel_sync(
@@ -248,12 +167,13 @@ def test_sync_ssh_passes_remote_to_tunnel_sync(
     assert captured["force"] is False
 
 
-def test_sync_ssh_prefers_cpu_bridge_over_default(
+def test_sync_ssh_prefers_live_default_bridge_first(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = make_sync_config(tmp_path)
     captured: Dict[str, Any] = {}
     checked_bridges: list[str] = []
+    probe_settings: list[tuple[int, float, bool, int]] = []
 
     monkeypatch.setattr(
         Config,
@@ -269,6 +189,14 @@ def test_sync_ssh_prefers_cpu_bridge_over_default(
 
     def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
         checked_bridges.append(kwargs["bridge_name"])
+        probe_settings.append(
+            (
+                kwargs["retries"],
+                kwargs["retry_pause"],
+                kwargs["progressive"],
+                kwargs["probe_timeout"],
+            )
+        )
         return True
 
     def fake_sync_via_ssh(*args: Any, **kwargs: Any) -> dict:
@@ -282,11 +210,12 @@ def test_sync_ssh_prefers_cpu_bridge_over_default(
     result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "remote"])
 
     assert result.exit_code == EXIT_SUCCESS
-    assert checked_bridges[0] == "cpu-main"
-    assert captured["bridge_name"] == "cpu-main"
+    assert checked_bridges == ["gpu-main", "cpu-main"]
+    assert probe_settings == [(0, 0.0, False, 2), (0, 0.0, False, 2)]
+    assert captured["bridge_name"] == "gpu-main"
 
 
-def test_sync_ssh_falls_back_when_cpu_bridge_unavailable(
+def test_sync_ssh_uses_first_remaining_live_bridge_when_default_is_down(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = make_sync_config(tmp_path)
@@ -308,7 +237,7 @@ def test_sync_ssh_falls_back_when_cpu_bridge_unavailable(
     def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
         bridge_name = kwargs["bridge_name"]
         checked_bridges.append(bridge_name)
-        return bridge_name == "gpu-main"
+        return bridge_name == "cpu-main"
 
     def fake_sync_via_ssh(*args: Any, **kwargs: Any) -> dict:
         captured.update(kwargs)
@@ -321,8 +250,8 @@ def test_sync_ssh_falls_back_when_cpu_bridge_unavailable(
     result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "remote"])
 
     assert result.exit_code == EXIT_SUCCESS
-    assert checked_bridges[:2] == ["cpu-main", "gpu-main"]
-    assert captured["bridge_name"] == "gpu-main"
+    assert checked_bridges == ["gpu-main", "cpu-main"]
+    assert captured["bridge_name"] == "cpu-main"
 
 
 def test_sync_ssh_uses_offline_bundle_when_only_no_internet_bridge_available(
@@ -390,6 +319,44 @@ def test_sync_source_remote_requires_internet_bridge(
     assert result.exit_code == EXIT_CONFIG_ERROR
     assert "has no internet" in result.output
     assert ssh_called["value"] is False
+
+
+def test_sync_source_remote_skips_live_offline_default_bridge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_sync_config(tmp_path)
+    captured: Dict[str, Any] = {}
+    checked_bridges: list[str] = []
+
+    monkeypatch.setattr(
+        Config,
+        "from_files_and_env",
+        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
+    )
+    _patch_common_git_helpers(monkeypatch)
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "load_tunnel_config",
+        lambda: make_mixed_internet_and_offline_tunnel_config(default_bridge="gpu-offline"),
+    )
+
+    def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
+        checked_bridges.append(kwargs["bridge_name"])
+        return True
+
+    def fake_sync_via_ssh(*args: Any, **kwargs: Any) -> dict:
+        captured.update(kwargs)
+        return {"success": True, "synced_sha": "a" * 40, "error": None}
+
+    monkeypatch.setattr(sync_cmd_module, "is_tunnel_available", fake_is_tunnel_available)
+    monkeypatch.setattr(sync_cmd_module, "sync_via_ssh", fake_sync_via_ssh)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "remote"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert checked_bridges == ["gpu-offline", "cpu-main"]
+    assert captured["bridge_name"] == "cpu-main"
 
 
 def test_sync_source_bundle_forces_bundle_even_on_internet_bridge(
@@ -464,51 +431,6 @@ def test_sync_source_bundle_force_passes_hard_reset_flag(
     assert bundle_kwargs["force"] is True
 
 
-def test_sync_source_bundle_prefers_offline_bridge_before_internet_bridge(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    config = make_sync_config(tmp_path)
-    checked_bridges: list[str] = []
-    bundle_kwargs: Dict[str, Any] = {}
-
-    monkeypatch.setattr(
-        Config,
-        "from_files_and_env",
-        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
-    )
-    _patch_common_git_helpers(monkeypatch)
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "load_tunnel_config",
-        lambda: make_mixed_internet_and_offline_tunnel_config(default_bridge="cpu-main"),
-    )
-
-    def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
-        bridge_name = kwargs["bridge_name"]
-        checked_bridges.append(bridge_name)
-        return bridge_name == "gpu-offline"
-
-    monkeypatch.setattr(sync_cmd_module, "is_tunnel_available", fake_is_tunnel_available)
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "sync_via_ssh_bundle",
-        lambda *args, **kwargs: bundle_kwargs.update(kwargs)
-        or {"success": True, "synced_sha": "a" * 40, "error": None},
-    )
-    monkeypatch.setattr(
-        sync_cmd_module,
-        "sync_via_ssh",
-        lambda *args, **kwargs: {"success": False, "synced_sha": None, "error": "should not run"},
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "bundle"])
-
-    assert result.exit_code == EXIT_SUCCESS
-    assert checked_bridges[0] == "gpu-offline"
-    assert bundle_kwargs["bridge_name"] == "gpu-offline"
-
-
 def test_sync_resolves_commit_and_message_from_current_branch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -559,14 +481,6 @@ def test_sync_rejects_removed_branch_option() -> None:
     assert "No such option: --branch" in result.output
 
 
-def test_sync_rejects_removed_source_auto_value() -> None:
-    runner = CliRunner()
-    result = runner.invoke(cli_main, ["sync", "--source", "auto"])
-
-    assert result.exit_code != EXIT_SUCCESS
-    assert "Invalid value for '--source'" in result.output
-
-
 def test_sync_default_bundle_mode_skips_push(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -601,11 +515,10 @@ def test_sync_default_bundle_mode_skips_push(
     assert push_called["value"] is False
 
 
-def test_sync_default_bundle_mode_on_internet_bridge_skips_push(
+def test_sync_source_remote_skips_push_by_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = make_sync_config(tmp_path)
-    bundle_called = {"value": False}
     ssh_called = {"value": False}
     push_called = {"value": False}
 
@@ -624,24 +537,17 @@ def test_sync_default_bundle_mode_on_internet_bridge_skips_push(
     )
     monkeypatch.setattr(
         sync_cmd_module,
-        "sync_via_ssh_bundle",
-        lambda *args, **kwargs: bundle_called.update(value=True)
-        or {"success": True, "synced_sha": "a" * 40, "error": None},
-    )
-    monkeypatch.setattr(
-        sync_cmd_module,
         "sync_via_ssh",
         lambda *args, **kwargs: ssh_called.update(value=True)
-        or {"success": False, "synced_sha": None, "error": "should not run"},
+        or {"success": True, "synced_sha": "a" * 40, "error": None},
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli_main, ["sync"])
+    result = runner.invoke(cli_main, ["sync", "--source", "remote"])
 
     assert result.exit_code == EXIT_SUCCESS
     assert push_called["value"] is False
-    assert bundle_called["value"] is True
-    assert ssh_called["value"] is False
+    assert ssh_called["value"] is True
 
 
 def test_sync_push_mode_best_effort_continues_on_remote(
@@ -986,7 +892,196 @@ def test_sync_failure_json_output_uses_summarized_message_and_hint(
     assert payload["success"] is False
     assert (
         payload["error"]["message"]
-        == "Branch 'main' on Bridge diverged and cannot be fast-forwarded."
+        == "Sync failed: Branch 'main' on Bridge diverged and cannot be fast-forwarded."
     )
     assert "Reconcile branch history" in payload["error"]["hint"]
     assert "setlocale" not in payload["error"]["message"]
+
+
+def test_sync_ssh_retries_on_another_bridge_after_remote_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_sync_config(tmp_path)
+    tunnel_config = make_mixed_tunnel_config(default_bridge="gpu-main")
+    checked_bridges: list[str] = []
+    used_bridges: list[str] = []
+    saved_defaults: list[str] = []
+
+    monkeypatch.setattr(
+        Config,
+        "from_files_and_env",
+        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
+    )
+    _patch_common_git_helpers(monkeypatch)
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "load_tunnel_config",
+        lambda: tunnel_config,
+    )
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "save_tunnel_config",
+        lambda updated: saved_defaults.append(updated.default_bridge),
+    )
+
+    def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
+        checked_bridges.append(kwargs["bridge_name"])
+        return True
+
+    def fake_sync_via_ssh(*args: Any, **kwargs: Any) -> dict:
+        bridge_name = kwargs["bridge_name"]
+        used_bridges.append(bridge_name)
+        if bridge_name == "gpu-main":
+            return {
+                "success": False,
+                "synced_sha": None,
+                "error": "Sync command timed out after 120s",
+            }
+        return {"success": True, "synced_sha": "a" * 40, "error": None}
+
+    monkeypatch.setattr(sync_cmd_module, "is_tunnel_available", fake_is_tunnel_available)
+    monkeypatch.setattr(sync_cmd_module, "sync_via_ssh", fake_sync_via_ssh)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "remote"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert checked_bridges == ["gpu-main", "cpu-main"]
+    assert used_bridges == ["gpu-main", "cpu-main"]
+    assert tunnel_config.default_bridge == "cpu-main"
+    assert saved_defaults == ["cpu-main"]
+
+
+def test_sync_bundle_retries_on_another_bridge_after_bundle_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_sync_config(tmp_path)
+    checked_bridges: list[str] = []
+    used_bridges: list[str] = []
+
+    monkeypatch.setattr(
+        Config,
+        "from_files_and_env",
+        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
+    )
+    _patch_common_git_helpers(monkeypatch)
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "load_tunnel_config",
+        lambda: make_mixed_tunnel_config(default_bridge="gpu-main"),
+    )
+
+    def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
+        checked_bridges.append(kwargs["bridge_name"])
+        return True
+
+    def fake_sync_via_ssh_bundle(*args: Any, **kwargs: Any) -> dict:
+        bridge_name = kwargs["bridge_name"]
+        used_bridges.append(bridge_name)
+        if bridge_name == "gpu-main":
+            return {
+                "success": False,
+                "synced_sha": None,
+                "error": "Offline sync command timed out after 120s",
+            }
+        return {"success": True, "synced_sha": "a" * 40, "error": None}
+
+    monkeypatch.setattr(sync_cmd_module, "is_tunnel_available", fake_is_tunnel_available)
+    monkeypatch.setattr(sync_cmd_module, "sync_via_ssh_bundle", fake_sync_via_ssh_bundle)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "bundle"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert checked_bridges == ["gpu-main", "cpu-main"]
+    assert used_bridges == ["gpu-main", "cpu-main"]
+
+
+def test_sync_ssh_probes_all_bridges_before_first_sync_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_sync_config(tmp_path)
+    tunnel_config = make_mixed_tunnel_config(default_bridge="gpu-main")
+    checked_bridges: list[str] = []
+    used_bridges: list[str] = []
+    save_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        Config,
+        "from_files_and_env",
+        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
+    )
+    _patch_common_git_helpers(monkeypatch)
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "load_tunnel_config",
+        lambda: tunnel_config,
+    )
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "save_tunnel_config",
+        lambda updated: save_calls.__setitem__("count", save_calls["count"] + 1),
+    )
+
+    def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
+        checked_bridges.append(kwargs["bridge_name"])
+        return True
+
+    def fake_sync_via_ssh(*args: Any, **kwargs: Any) -> dict:
+        used_bridges.append(kwargs["bridge_name"])
+        return {"success": True, "synced_sha": "a" * 40, "error": None}
+
+    monkeypatch.setattr(sync_cmd_module, "is_tunnel_available", fake_is_tunnel_available)
+    monkeypatch.setattr(sync_cmd_module, "sync_via_ssh", fake_sync_via_ssh)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "remote"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert checked_bridges == ["gpu-main", "cpu-main"]
+    assert used_bridges == ["gpu-main"]
+    assert tunnel_config.default_bridge == "gpu-main"
+    assert save_calls["count"] == 0
+
+
+def test_sync_ssh_timeout_failover_ignores_non_live_bridges(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_sync_config(tmp_path)
+    checked_bridges: list[str] = []
+    used_bridges: list[str] = []
+
+    monkeypatch.setattr(
+        Config,
+        "from_files_and_env",
+        classmethod(lambda cls, require_target_dir=False, require_credentials=True: (config, {})),
+    )
+    _patch_common_git_helpers(monkeypatch)
+    monkeypatch.setattr(
+        sync_cmd_module,
+        "load_tunnel_config",
+        lambda: make_mixed_tunnel_config(default_bridge="gpu-main"),
+    )
+
+    def fake_is_tunnel_available(*args: Any, **kwargs: Any) -> bool:
+        bridge_name = kwargs["bridge_name"]
+        checked_bridges.append(bridge_name)
+        return bridge_name == "gpu-main"
+
+    def fake_sync_via_ssh(*args: Any, **kwargs: Any) -> dict:
+        used_bridges.append(kwargs["bridge_name"])
+        return {
+            "success": False,
+            "synced_sha": None,
+            "error": "Sync command timed out after 120s",
+        }
+
+    monkeypatch.setattr(sync_cmd_module, "is_tunnel_available", fake_is_tunnel_available)
+    monkeypatch.setattr(sync_cmd_module, "sync_via_ssh", fake_sync_via_ssh)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync", "--no-push", "--source", "remote"])
+
+    assert result.exit_code == EXIT_GENERAL_ERROR
+    assert checked_bridges == ["gpu-main", "cpu-main"]
+    assert used_bridges == ["gpu-main"]

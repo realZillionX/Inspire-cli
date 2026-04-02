@@ -160,7 +160,8 @@ def _build_rtunnel_bin_lines(
     if rtunnel_bin:
         lines.append(
             'if [ -x "$RTUNNEL_BIN_PATH" ]; then RTUNNEL_BIN="$RTUNNEL_BIN_PATH"; '
-            'elif [ -f "$RTUNNEL_BIN_PATH" ]; then cp "$RTUNNEL_BIN_PATH" "$RTUNNEL_BIN" '
+            'elif [ -f "$RTUNNEL_BIN_PATH" ]; then rm -f "$RTUNNEL_BIN" && '
+            'cp "$RTUNNEL_BIN_PATH" "$RTUNNEL_BIN" '
             '&& chmod +x "$RTUNNEL_BIN"; fi'
         )
 
@@ -169,6 +170,7 @@ def _build_rtunnel_bin_lines(
         lines.append(
             f'for _d in . "$HOME"; do '
             f'if [ ! -x "$RTUNNEL_BIN" ] && [ -f "$_d"/{safe_name} ]; then '
+            f'rm -f "$RTUNNEL_BIN" && '
             f'cp "$_d"/{safe_name} "$RTUNNEL_BIN" && chmod +x "$RTUNNEL_BIN" '
             "&& break; fi; done"
         )
@@ -193,8 +195,7 @@ def _build_curl_rtunnel_block(*, skip_curl: bool) -> str:
 
 def _inet_probe_command() -> str:
     return (
-        "_INET=0; timeout 3 bash -c "
-        "'exec 3<>/dev/tcp/archive.ubuntu.com/80' 2>/dev/null && _INET=1"
+        "_INET=0; timeout 3 bash -c 'exec 3<>/dev/tcp/archive.ubuntu.com/80' 2>/dev/null && _INET=1"
     )
 
 

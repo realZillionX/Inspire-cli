@@ -362,7 +362,7 @@ def run_notebook_ssh(
                         config=cached_config,
                         remote_command=command,
                     )
-                    os.execvpe("ssh", args, build_ssh_process_env())
+                    os.execvpe(args[0], args, build_ssh_process_env())
                     return
             except (subprocess.TimeoutExpired, Exception):
                 pass
@@ -494,7 +494,7 @@ def run_notebook_ssh(
         config=tunnel_config,
         remote_command=command,
     )
-    os.execvpe("ssh", args, build_ssh_process_env())
+    os.execvpe(args[0], args, build_ssh_process_env())
 
 
 __all__ = ["load_ssh_public_key", "run_notebook_ssh"]

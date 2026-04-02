@@ -709,14 +709,7 @@ def _log_ws_diagnostics(diag: dict) -> None:
         f"elapsed={diag.get('elapsed', 0)}ms",
     ]
     trace_event("terminal_ws_diagnostics", **diag)
-    _log_terminal_status("  [ws-diagnostics] " + " | ".join(parts))
-
-
-def _log_terminal_status(message: str) -> None:
-    import sys as _sys
-
-    _sys.stderr.write(message + "\n")
-    _sys.stderr.flush()
+    _log.info("  [ws-diagnostics] " + " | ".join(parts))
 
 
 def _wait_for_api_terminal_surface(
@@ -750,7 +743,7 @@ def _open_terminal_via_rest_api(
         trace_event("terminal_rest_path_unavailable")
         return False, False, None
 
-    _log_terminal_status(f"  Created terminal '{term_name}' via REST API.")
+    _log.info(f"  Created terminal '{term_name}' via REST API.")
     update_trace_summary(terminal_transport="rest_api_terminal")
     server_base = _jupyter_server_base(lab_url)
     term_url = f"{server_base}lab/terminals/{term_name}?reset"
@@ -761,13 +754,13 @@ def _open_terminal_via_rest_api(
             return True, True, term_name
     except (PlaywrightError, TimeoutError, RuntimeError, AttributeError, ValueError) as _nav_err:
         trace_event("terminal_rest_navigation_failed", term_name=term_name, error=_nav_err)
-        _log_terminal_status(
+        _log.info(
             f"  REST API terminal created but navigation failed ({type(_nav_err).__name__}: {str(_nav_err)[:150]}), trying DOM fallbacks..."
         )
         return False, True, term_name
 
     trace_event("terminal_rest_surface_delayed", term_name=term_name)
-    _log_terminal_status(
+    _log.info(
         "  REST API terminal created but xterm not yet visible; continuing with API terminal path."
     )
     return _wait_for_api_terminal_surface(lab_frame, page), True, term_name

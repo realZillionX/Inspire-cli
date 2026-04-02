@@ -102,12 +102,19 @@ class InspireAPI:
             return f"{self.config.docker_registry}/{self.DEFAULT_IMAGE_PATH}"
         return self.DEFAULT_IMAGE
 
-    def __init__(self, config: Optional[InspireConfig] = None):
+    def __init__(
+        self,
+        config: Optional[InspireConfig] = None,
+        *,
+        skip_live_probe: bool = False,
+    ):
         """
         Initialize API client.
 
         Args:
             config: API configuration object, uses default config if None
+            skip_live_probe: If True, skip probing browser API for live resource specs
+                           (useful in tests to avoid network calls)
         """
         self.config = config or InspireConfig()
 
@@ -126,7 +133,11 @@ class InspireAPI:
         )
 
         # Initialize resource manager
-        self.resource_manager = ResourceManager(self.config.compute_groups)
+        self.resource_manager = ResourceManager(
+            self.config,
+            self.config.compute_groups,
+            skip_live_probe=skip_live_probe,
+        )
 
         # Use simple requests session
         self.session = requests.Session()
@@ -136,8 +147,12 @@ class InspireAPI:
         # Optional override: force using proxy even if no_proxy would normally bypass it.
         # This preserves the previous WSL corporate-proxy workaround when needed.
         if self.config.force_proxy or _env_enabled("INSPIRE_FORCE_PROXY"):
-            http_proxy = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY")
-            https_proxy = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
+            http_proxy = (
+                os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY") or ""
+            ).strip()
+            https_proxy = (
+                os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY") or ""
+            ).strip()
             if http_proxy or https_proxy:
                 self.session.proxies = {
                     "http": http_proxy or https_proxy,

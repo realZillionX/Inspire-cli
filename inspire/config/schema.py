@@ -47,6 +47,18 @@ CONFIG_OPTIONS: list[ConfigOption] = [
     *TUNNEL_OPTIONS,
 ]
 
+_DISCOVERY_OWNED_TOML_KEYS = frozenset(
+    {
+        "workspaces.cpu",
+        "workspaces.gpu",
+        "workspaces.internet",
+    }
+)
+
+_DEPRECATED_MANUAL_EDIT_REDIRECTS = {
+    "paths.target_dir": "defaults.target_dir",
+}
+
 
 def get_options_by_category(category: str) -> list[ConfigOption]:
     """Get all configuration options for a category."""
@@ -67,6 +79,34 @@ def get_option_by_toml(toml_key: str) -> ConfigOption | None:
         if opt.toml_key == toml_key:
             return opt
     return None
+
+
+def get_user_managed_options() -> list[ConfigOption]:
+    """Return config options that are safe for manual editing via CLI."""
+    return [
+        opt
+        for opt in CONFIG_OPTIONS
+        if opt.toml_key not in _DISCOVERY_OWNED_TOML_KEYS
+        and opt.toml_key not in _DEPRECATED_MANUAL_EDIT_REDIRECTS
+    ]
+
+
+def get_user_managed_option_by_toml(toml_key: str) -> ConfigOption | None:
+    """Get a user-managed configuration option by TOML key."""
+    for opt in get_user_managed_options():
+        if opt.toml_key == toml_key:
+            return opt
+    return None
+
+
+def get_manual_edit_redirect(toml_key: str) -> str | None:
+    """Return the preferred replacement key for deprecated manual-edit paths."""
+    return _DEPRECATED_MANUAL_EDIT_REDIRECTS.get(toml_key)
+
+
+def is_discovery_owned_toml_key(toml_key: str) -> bool:
+    """Return whether a TOML key is owned by platform discovery."""
+    return toml_key in _DISCOVERY_OWNED_TOML_KEYS
 
 
 def get_option_by_field(field_name: str) -> ConfigOption | None:

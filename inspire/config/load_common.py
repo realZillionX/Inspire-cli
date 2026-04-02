@@ -66,6 +66,12 @@ _DEFAULTS_FIELD_MAP = {
     "project_order": "project_order",
 }
 
+# Legacy field mappings for backward compatibility
+_LEGACY_FIELD_MAP = {
+    # paths.target_dir -> defaults.target_dir
+    ("paths", "target_dir"): ("defaults", "target_dir"),
+}
+
 _CONTEXT_WORKSPACE_FIELD_MAP = {
     "workspace": "job_workspace_id",
     "workspace_cpu": "workspace_cpu_id",
@@ -245,7 +251,7 @@ def _normalize_project_catalog(raw_value: Any) -> dict[str, dict[str, Any]]:
             continue
 
         entry: dict[str, Any] = {}
-        for key in ("shared_path_group", "workdir"):
+        for key in ("name", "shared_path_group", "workdir"):
             value = raw_entry.get(key)
             if isinstance(value, str):
                 value = value.strip()

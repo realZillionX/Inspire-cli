@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -152,14 +151,7 @@ def trace_event(event: str, **fields: object) -> None:
 
     combined = {**base_fields, **safe_fields}
     kv = " ".join(f"{key}={value}" for key, value in combined.items())
-    _TRACE_LOG.debug("%s %s", event, kv)
-
-    if _debug_enabled():
-        if kv:
-            sys.stderr.write(f"  [rtunnel-debug] {event} | {kv}\n")
-        else:
-            sys.stderr.write(f"  [rtunnel-debug] {event}\n")
-        sys.stderr.flush()
+    _TRACE_LOG.debug("[rtunnel-debug] %s | %s", event, kv)
 
 
 def format_trace_summary(trace: RtunnelTrace | None = None) -> str:

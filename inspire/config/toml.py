@@ -10,6 +10,8 @@ try:
 except ImportError:  # pragma: no cover
     import tomli as tomllib
 
+import tomlkit
+
 from inspire.config.models import CONFIG_FILENAME, PROJECT_CONFIG_DIR, ConfigError
 from inspire.config.schema import get_option_by_toml
 from inspire.config.schema_models import ConfigOption
@@ -58,3 +60,44 @@ def _validate_toml_value(option: ConfigOption, value: Any) -> Any:
         except (ValueError, TypeError) as exc:
             raise ConfigError(f"Invalid value for {option.toml_key}: {exc}") from exc
     return value
+
+
+def save_config(config) -> None:
+    """Save workspace_specs to global config file.
+
+    Only workspace_specs is persisted. Other config fields are loaded from
+    environment/files and should not be written back.
+
+    Args:
+        config: Config object with workspace_specs to save
+
+    Raises:
+        ConfigError: If unable to write config file
+    """
+    from inspire.config.models import Config
+
+    if not isinstance(config, Config):
+        raise ConfigError("Expected Config instance")
+
+    config_path = Config.resolve_global_config_path()
+
+    # Load existing config or create new
+    if config_path.exists():
+        with open(config_path, "rb") as f:
+            data = tomllib.load(f)
+    else:
+        data = {}
+
+    # Update workspace_specs section
+    if config.workspace_specs:
+        data["workspace_specs"] = config.workspace_specs
+    elif "workspace_specs" in data:
+        del data["workspace_specs"]
+
+    # Write back
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w") as f:
+            tomlkit.dump(data, f)
+    except Exception as e:
+        raise ConfigError(f"Failed to write config file {config_path}: {e}") from e

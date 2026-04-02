@@ -90,7 +90,11 @@ def make_test_config(tmp_path: Path, include_compute_groups: bool = False) -> co
 class DummyAPI:
     def __init__(self) -> None:
         self.calls: Dict[str, Any] = {}
-        self.resource_manager = ResourceManager()
+        from unittest.mock import MagicMock
+
+        mock_config = MagicMock()
+        mock_config.workspace_specs = {}
+        self.resource_manager = ResourceManager(mock_config, skip_live_probe=True)
 
     # Job-related methods -------------------------------------------------
     def create_training_job_smart(self, **kwargs: Any) -> Dict[str, Any]:
@@ -157,7 +161,9 @@ def patch_config_and_auth(
             raise ConfigError("Missing INSPIRE_TARGET_DIR")
         return config
 
-    def fake_from_files_and_env(cls, require_target_dir: bool = False, require_credentials: bool = True) -> tuple:  # type: ignore[override]
+    def fake_from_files_and_env(
+        cls, require_target_dir: bool = False, require_credentials: bool = True
+    ) -> tuple:  # type: ignore[override]
         if require_target_dir and not config.target_dir:
             raise ConfigError("Missing INSPIRE_TARGET_DIR")
         return config, {}
@@ -220,13 +226,29 @@ def test_global_json_flag_with_resources_list(monkeypatch: pytest.MonkeyPatch, t
     # Include test compute groups in config
     patch_config_and_auth(monkeypatch, tmp_path, include_compute_groups=True)
     from inspire.platform.web import browser_api as browser_api_module
+    from inspire.cli.commands.resources import resources_list as resources_list_module
+
+    monkeypatch.setattr(
+        resources_list_module,
+        "get_web_session",
+        lambda require_workspace=False: type(
+            "FakeWebSession",
+            (),
+            {
+                "workspace_id": "ws-test-workspace",
+                "all_workspace_ids": ["ws-test-workspace"],
+                "all_workspace_names": {},
+                "storage_state": {},
+            },
+        )(),
+    )
 
     # Use a test placeholder UUID instead of real compute group ID
     test_group_id = "lcg-test000-0000-0000-0000-000000000000"
     monkeypatch.setattr(
         browser_api_module,
         "get_accurate_gpu_availability",
-        lambda: [
+        lambda **_: [
             browser_api_module.GPUAvailability(
                 group_id=test_group_id,
                 group_name="H200 TestRoom",
@@ -238,6 +260,7 @@ def test_global_json_flag_with_resources_list(monkeypatch: pytest.MonkeyPatch, t
             )
         ],
     )
+    monkeypatch.setattr(resources_list_module, "_collect_cpu_resources", lambda **_: [])
     runner = CliRunner()
 
     result = runner.invoke(cli_main, ["--json", "resources", "list"])
@@ -252,12 +275,29 @@ def test_global_json_flag_with_resources_list(monkeypatch: pytest.MonkeyPatch, t
 def test_global_debug_flag_runs_subcommand(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     patch_config_and_auth(monkeypatch, tmp_path)
     from inspire.platform.web import browser_api as browser_api_module
+    from inspire.cli.commands.resources import resources_list as resources_list_module
+
+    monkeypatch.setattr(
+        resources_list_module,
+        "get_web_session",
+        lambda require_workspace=False: type(
+            "FakeWebSession",
+            (),
+            {
+                "workspace_id": "ws-test-workspace",
+                "all_workspace_ids": ["ws-test-workspace"],
+                "all_workspace_names": {},
+                "storage_state": {},
+            },
+        )(),
+    )
 
     monkeypatch.setattr(
         browser_api_module,
         "get_accurate_gpu_availability",
-        lambda: [],
+        lambda **_: [],
     )
+    monkeypatch.setattr(resources_list_module, "_collect_cpu_resources", lambda **_: [])
     runner = CliRunner()
 
     result = runner.invoke(cli_main, ["--debug", "resources", "list"])
@@ -440,6 +480,52 @@ def test_job_create_requires_target_dir(monkeypatch: pytest.MonkeyPatch):
 
     assert result.exit_code == EXIT_CONFIG_ERROR
     assert "Missing INSPIRE_TARGET_DIR" in result.output
+
+
+def test_job_create_workspace_error_mentions_account_scoped_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    config = make_test_config(tmp_path)
+    config.job_workspace_id = None
+    config.workspace_gpu_id = None
+    config.workspace_internet_id = None
+    config.workspace_cpu_id = None
+    config.workspaces = {}
+
+    def fake_from_files_and_env(
+        cls, require_target_dir: bool = False, require_credentials: bool = True
+    ):  # type: ignore[override]
+        if require_target_dir and not config.target_dir:
+            raise ConfigError("Missing INSPIRE_TARGET_DIR")
+        return config, {}
+
+    monkeypatch.setattr(
+        config_module.Config, "from_files_and_env", classmethod(fake_from_files_and_env)
+    )
+
+    api = DummyAPI()
+    monkeypatch.setattr(auth_module.AuthManager, "get_api", lambda *_args, **_kwargs: api)
+    auth_module.AuthManager.clear_cache()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "job",
+            "create",
+            "--name",
+            "no-ws",
+            "--resource",
+            "H200",
+            "--command",
+            "echo hi",
+            "--no-auto",
+        ],
+    )
+
+    assert result.exit_code == EXIT_CONFIG_ERROR
+    assert '[accounts."<username>".workspaces].gpu' in result.output
+    assert '[accounts."<username>".workspaces].internet' in result.output
 
 
 def _patch_low_priority_project(
@@ -735,6 +821,79 @@ def test_job_status_not_found_sets_specific_exit_code(
     assert result.exit_code == EXIT_JOB_NOT_FOUND
 
 
+def test_job_status_loads_credentials_from_layered_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_test_config(tmp_path)
+
+    def fail_from_env(cls, require_target_dir: bool = False) -> config_module.Config:  # type: ignore[override]
+        raise AssertionError("job status should not use Config.from_env")
+
+    def fake_from_files_and_env(
+        cls, require_target_dir: bool = False, require_credentials: bool = True
+    ) -> tuple[config_module.Config, dict[str, str]]:  # type: ignore[override]
+        assert require_target_dir is False
+        assert require_credentials is True
+        return config, {}
+
+    monkeypatch.setattr(config_module.Config, "from_env", classmethod(fail_from_env))
+    monkeypatch.setattr(
+        config_module.Config, "from_files_and_env", classmethod(fake_from_files_and_env)
+    )
+
+    api = DummyAPI()
+
+    def fake_get_api(self_or_cls, cfg: Optional[config_module.Config] = None) -> DummyAPI:  # type: ignore[override]
+        assert cfg is config or cfg is None
+        return api
+
+    monkeypatch.setattr(auth_module.AuthManager, "get_api", fake_get_api)
+    auth_module.AuthManager.clear_cache()
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["job", "status", TEST_JOB_ID])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "SUCCEEDED" in result.output
+
+
+def test_job_status_reauths_once_after_connection_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_test_config(tmp_path)
+
+    def fake_from_files_and_env(
+        cls, require_target_dir: bool = False, require_credentials: bool = True
+    ) -> tuple[config_module.Config, dict[str, str]]:  # type: ignore[override]
+        return config, {}
+
+    monkeypatch.setattr(
+        config_module.Config, "from_files_and_env", classmethod(fake_from_files_and_env)
+    )
+
+    class FailingAPI:
+        def get_job_detail(self, job_id: str) -> Dict[str, Any]:  # noqa: ARG002
+            raise RuntimeError("Connection error after 3 retries")
+
+    refreshed_api = DummyAPI()
+    get_api_calls: List[int] = []
+
+    def fake_get_api(self_or_cls, cfg: Optional[config_module.Config] = None):  # type: ignore[override]
+        assert cfg is config or cfg is None
+        get_api_calls.append(1)
+        return FailingAPI() if len(get_api_calls) == 1 else refreshed_api
+
+    monkeypatch.setattr(auth_module.AuthManager, "get_api", fake_get_api)
+    auth_module.AuthManager.clear_cache()
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["job", "status", TEST_JOB_ID])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "SUCCEEDED" in result.output
+    assert len(get_api_calls) == 2
+
+
 def test_job_stop_with_force_and_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     patch_config_and_auth(monkeypatch, tmp_path)
     runner = CliRunner()
@@ -830,6 +989,46 @@ def test_job_wait_times_out(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     )
     assert result.exit_code == EXIT_TIMEOUT
     assert "Timeout after 1s" in result.output
+
+
+def test_job_wait_reauths_after_connection_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = make_test_config(tmp_path)
+
+    def fake_from_files_and_env(
+        cls, require_target_dir: bool = False, require_credentials: bool = True
+    ) -> tuple[config_module.Config, dict[str, str]]:  # type: ignore[override]
+        return config, {}
+
+    monkeypatch.setattr(
+        config_module.Config, "from_files_and_env", classmethod(fake_from_files_and_env)
+    )
+
+    class FailingAPI:
+        def get_job_detail(self, job_id: str) -> Dict[str, Any]:  # noqa: ARG002
+            raise RuntimeError("Connection error after 3 retries")
+
+    refreshed_api = DummyAPI()
+    get_api_calls: List[int] = []
+
+    def fake_get_api(self_or_cls, cfg: Optional[config_module.Config] = None):  # type: ignore[override]
+        assert cfg is config or cfg is None
+        get_api_calls.append(1)
+        return FailingAPI() if len(get_api_calls) == 1 else refreshed_api
+
+    monkeypatch.setattr(auth_module.AuthManager, "get_api", fake_get_api)
+    auth_module.AuthManager.clear_cache()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        ["job", "wait", TEST_JOB_ID, "--timeout", "60", "--interval", "1"],
+    )
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "SUCCEEDED" in result.output
+    assert len(get_api_calls) == 2
 
 
 def test_job_list_uses_local_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -1387,6 +1586,43 @@ def test_tunnel_list_json_places_connected_bridges_first(monkeypatch: pytest.Mon
     assert names == ["alpha", "beta", "zeta"]
 
 
+def test_tunnel_list_json_local_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test that local --json flag (after command) works, not just global flag."""
+    from importlib import import_module
+
+    list_cmd_module = import_module("inspire.cli.commands.tunnel.list_cmd")
+
+    patch_config_and_auth(monkeypatch, tmp_path)
+    from inspire.bridge.tunnel import TunnelConfig, BridgeProfile
+
+    tunnel_config = TunnelConfig()
+    tunnel_config.add_bridge(BridgeProfile(name="alpha", proxy_url="https://a.example.com"))
+    tunnel_config.add_bridge(BridgeProfile(name="beta", proxy_url="https://b.example.com"))
+    tunnel_config.add_bridge(BridgeProfile(name="zeta", proxy_url="https://z.example.com"))
+    monkeypatch.setattr(list_cmd_module, "load_tunnel_config", lambda: tunnel_config)
+    monkeypatch.setattr(
+        list_cmd_module,
+        "_check_bridges",
+        lambda bridges, config, timeout=5: {  # noqa: ARG005
+            "zeta": False,
+            "alpha": True,
+            "beta": False,
+        },
+    )
+
+    runner = CliRunner()
+    # Test LOCAL --json flag (after subcommand)
+    result = runner.invoke(cli_main, ["tunnel", "list", "--json"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    payload = json.loads(result.output)
+    bridges = payload.get("bridges")
+    if bridges is None:
+        bridges = payload.get("data", {}).get("bridges", [])
+    names = [item["name"] for item in bridges]
+    assert names == ["alpha", "beta", "zeta"]
+
+
 # ---------------------------------------------------------------------------
 # Resources / nodes / config commands
 # ---------------------------------------------------------------------------
@@ -1445,7 +1681,9 @@ def test_config_check_auth_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     def fake_from_env(cls, require_target_dir: bool = False) -> config_module.Config:  # type: ignore[override]
         return config
 
-    def fake_from_files_and_env(cls, require_target_dir: bool = False, require_credentials: bool = True) -> tuple:  # type: ignore[override]
+    def fake_from_files_and_env(
+        cls, require_target_dir: bool = False, require_credentials: bool = True
+    ) -> tuple:  # type: ignore[override]
         return config, {}
 
     monkeypatch.setattr(config_module.Config, "from_env", classmethod(fake_from_env))

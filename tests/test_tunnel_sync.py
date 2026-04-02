@@ -11,11 +11,12 @@ class FakeCompletedProcess:
 
 
 def test_sync_via_ssh_uses_remote_and_commit(monkeypatch) -> None:
-    captured = {"command": ""}
+    captured = {"command": "", "kwargs": {}}
     commit_sha = "a" * 40
 
     def fake_run_ssh_command(command: str, *args: Any, **kwargs: Any) -> FakeCompletedProcess:
         captured["command"] = command
+        captured["kwargs"] = kwargs
         return FakeCompletedProcess(returncode=0, stdout=f"info\n{commit_sha}\n")
 
     monkeypatch.setattr(sync_module, "run_ssh_command", fake_run_ssh_command)
@@ -31,6 +32,8 @@ def test_sync_via_ssh_uses_remote_and_commit(monkeypatch) -> None:
     assert "git fetch upstream main" in captured["command"]
     assert f"git merge --ff-only {commit_sha}" in captured["command"]
     assert "expected_sha=" in captured["command"]
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["check"] is False
 
 
 def test_sync_via_ssh_force_uses_hard_reset(monkeypatch) -> None:
@@ -95,6 +98,8 @@ def test_sync_via_ssh_bundle_uses_scp_and_remote_fetch(monkeypatch) -> None:
     assert captured["scp_kwargs"]["bridge_name"] == "gpu-offline"
     assert "git fetch" in captured["remote_command"]
     assert commit_sha in captured["remote_command"]
+    assert captured["ssh_kwargs"]["capture_output"] is True
+    assert captured["ssh_kwargs"]["check"] is False
 
 
 def test_sync_via_ssh_bundle_uses_incremental_range(monkeypatch) -> None:

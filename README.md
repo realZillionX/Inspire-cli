@@ -19,6 +19,37 @@ uv tool install -e .
 inspire --help
 ```
 
+## Zsh Completion
+
+`inspire` uses Click's native shell completion. On `zsh`, the clean setup is the
+standard `fpath + compinit` flow, the same model many mature CLIs use.
+
+1. Make sure your `~/.zshrc` adds a personal completion directory before `compinit`:
+
+```zsh
+fpath=($HOME/.zsh/completions $fpath)
+autoload -Uz compinit
+compinit
+```
+
+2. Generate the completion function once:
+
+```bash
+mkdir -p ~/.zsh/completions
+_INSPIRE_COMPLETE=zsh_source inspire > ~/.zsh/completions/_inspire
+```
+
+3. Reload your shell:
+
+```bash
+exec zsh
+```
+
+Notes:
+- `oh-my-zsh` is not required.
+- Completion stays local-config-driven through Click `shell_complete=` hooks.
+- For local development, you can replace `inspire` with `uv run inspire` when generating `_inspire`.
+
 ## Quick Start
 
 ### 1. Auto-discover your platform
@@ -61,7 +92,8 @@ inspire notebook ssh <id>       # SSH into notebook (auto-installs tunnel)
 | `inspire bridge exec "<cmd>" [--stdin]` | Run command on Bridge runner |
 | `inspire bridge ssh [--bridge <name>]` | Interactive SSH shell to a Bridge profile |
 | `inspire bridge scp <source> <destination>` | Upload/download files via Bridge tunnel |
-| `inspire notebook list/create` | List or create notebook instances |
+| `inspire notebook list` | List notebooks (supports `--columns`, `--tunneled`, `--json`) |
+| `inspire notebook create` | Create a notebook instance |
 | `inspire notebook start/stop` | Start or stop a notebook |
 | `inspire notebook ssh <id>` | SSH into notebook (sets up tunnel) |
 | `inspire notebook top` | Show GPU utilization/memory for tunnel-backed notebooks |
@@ -74,6 +106,9 @@ inspire notebook ssh <id>       # SSH into notebook (auto-installs tunnel)
 | `inspire config show/check` | Inspect and validate configuration |
 | `inspire init` | Generate starter config from env vars |
 | `inspire init --discover` | Auto-discover projects, workspaces, compute groups |
+
+**Global Flags:**
+- `--json` - Output in JSON format (useful for scripting)
 
 ## Examples
 
@@ -105,6 +140,16 @@ inspire bridge scp -d /tmp/checkpoints/ ./checkpoints/ -r --bridge mybridge
 # Check GPU availability and project quota
 inspire resources list
 inspire project list
+
+# List notebooks with custom columns (show tunnel status)
+inspire notebook list -c name,status,tunnel
+
+# Show only notebooks with active SSH tunnels
+inspire notebook list --tunneled -n 10
+
+# JSON output for scripting
+inspire notebook list --json
+inspire job list --json
 ```
 
 ## SSH/SCP Reliability Notes

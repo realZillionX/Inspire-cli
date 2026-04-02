@@ -12,8 +12,9 @@ from .notebook_create_flow import maybe_run_post_start, run_notebook_create
 from .notebook_lookup import (
     _ZERO_WORKSPACE_ID,
     _list_notebooks_for_workspace,
+    _normalize_notebook_id,
     _resolve_notebook_id,
-    _sort_notebook_items,
+    _sort_notebook_items_by_tunnel_priority,
     _try_get_current_user_ids,
     _unique_workspace_ids,
 )
@@ -39,6 +40,7 @@ from inspire.cli.utils.notebook_post_start import (
 )
 from inspire.config import ConfigError
 from inspire.config.workspaces import select_workspace_id
+from inspire.bridge.tunnel import load_tunnel_config
 from inspire.platform.web import browser_api as browser_api_module
 from inspire.platform.web import session as web_session_module
 from inspire.platform.web.browser_api import NotebookFailedError
@@ -52,7 +54,11 @@ from inspire.platform.web.browser_api import NotebookFailedError
 )
 @click.option(
     "--workspace",
-    help="Workspace name (from [workspaces])",
+    help=(
+        'Workspace alias or ID. Common aliases from [accounts."<username>".workspaces] config: '
+        "'cpu' (CPU workloads), 'gpu' (H100/H200), 'internet' (RTX 4090 with internet). "
+        "Use --workspace-id for explicit UUID."
+    ),
 )
 @click.option(
     "--workspace-id",
@@ -63,6 +69,11 @@ from inspire.platform.web.browser_api import NotebookFailedError
     "-r",
     default=None,
     help="Resource spec (e.g., 1xH200, 4xH100, 4CPU) (default from config [notebook].resource or [defaults].resource)",
+)
+@click.option(
+    "--compute-group",
+    default=None,
+    help="Explicit compute group name or logic_compute_group_id override",
 )
 @click.option(
     "--project",
@@ -134,6 +145,7 @@ def create_notebook_cmd(
     workspace: Optional[str],
     workspace_id: Optional[str],
     resource: Optional[str],
+    compute_group: Optional[str],
     project: Optional[str],
     image: Optional[str],
     shm_size: Optional[int],
@@ -173,6 +185,7 @@ def create_notebook_cmd(
         workspace=workspace,
         workspace_id=workspace_id,
         resource=resource,
+        compute_group_name=compute_group,
         project=project,
         image=image,
         shm_size=shm_size,
@@ -487,7 +500,11 @@ def notebook_status(
 @click.command("list")
 @click.option(
     "--workspace",
-    help="Workspace name (from [workspaces])",
+    help=(
+        'Workspace alias or ID. Common aliases from [accounts."<username>".workspaces] config: '
+        "'cpu' (CPU workloads), 'gpu' (H100/H200), 'internet' (RTX 4090 with internet). "
+        "Use --workspace-id for explicit UUID."
+    ),
 )
 @click.option(
     "--workspace-id",
@@ -515,6 +532,11 @@ def notebook_status(
     help="Max number of notebooks to show",
 )
 @click.option(
+    "--tunneled",
+    is_flag=True,
+    help="Show only notebooks with active SSH tunnels",
+)
+@click.option(
     "--status",
     "-s",
     multiple=True,
@@ -532,6 +554,12 @@ def notebook_status(
     is_flag=True,
     help="Alias for global --json",
 )
+@click.option(
+    "--columns",
+    "-c",
+    default="name,status,resource",
+    help="Comma-separated columns to display (name,status,resource,id,created,gpu,cpu,memory,image,project,workspace,node,uptime,tunnel)",
+)
 @pass_context
 def list_notebooks(
     ctx: Context,
@@ -543,20 +571,28 @@ def list_notebooks(
     status: tuple[str, ...],
     keyword: str,
     json_output: bool,
+    columns: str,
+    tunneled: bool,
 ) -> None:
     """List notebook/interactive instances.
+
+    By default, shows recent notebooks with those having active tunnels listed first.
+    Use --tunneled to show only notebooks with SSH tunnels.
 
     \b
     Examples:
         inspire notebook list
         inspire notebook list --all
         inspire notebook list -n 10
+        inspire notebook list --tunneled -n 10
         inspire notebook list -s RUNNING
         inspire notebook list -s RUNNING -s STOPPED
         inspire notebook list --name my-notebook
         inspire notebook list --workspace gpu -s RUNNING -n 5
         inspire notebook list --all-workspaces
         inspire notebook list --json
+        inspire notebook list -c name,status,tunnel
+        inspire notebook list -c name,status,gpu,uptime
     """
     json_output = resolve_json_output(ctx, json_output)
 
@@ -625,7 +661,8 @@ def list_notebooks(
                 EXIT_CONFIG_ERROR,
                 hint=(
                     "Use --workspace-id, pass --workspace cpu/gpu/internet, or set "
-                    "[workspaces].cpu/[workspaces].gpu in config.toml."
+                    '[accounts."<username>".workspaces].cpu/'
+                    '[accounts."<username>".workspaces].gpu in config.toml.'
                 ),
             )
             return
@@ -636,6 +673,8 @@ def list_notebooks(
     user_ids = [] if show_all else _try_get_current_user_ids(session, base_url=base_url)
 
     all_items: list[dict] = []
+    # When filtering by tunneled, fetch more to ensure we get enough after filtering
+    fetch_limit = limit * 5 if tunneled else limit
     for ws_id in workspace_ids:
         status_filter = [s.upper() for s in status] if status else []
         try:
@@ -645,7 +684,7 @@ def list_notebooks(
                 workspace_id=ws_id,
                 user_ids=user_ids,
                 keyword=keyword,
-                page_size=limit,
+                page_size=fetch_limit,
                 status=status_filter,
             )
             all_items.extend(items)
@@ -679,8 +718,30 @@ def list_notebooks(
         )
         return
 
-    all_items = _sort_notebook_items(all_items)
-    _print_notebook_list(all_items, json_output)
+    # Filter and sort by tunnel status
+    tunnel_config = load_tunnel_config()
+    tunneled_ids = {
+        bridge.notebook_id for bridge in tunnel_config.list_bridges() if bridge.notebook_id
+    }
+
+    if tunneled:
+        # Show only notebooks with tunnels
+        all_items = [
+            item
+            for item in all_items
+            if _normalize_notebook_id(item.get("notebook_id") or item.get("id", "")) in tunneled_ids
+        ]
+        # Sort by created_at descending (most recent first)
+        all_items = sorted(
+            all_items, key=lambda item: str(item.get("created_at") or ""), reverse=True
+        )
+        # Apply limit after filtering
+        all_items = all_items[:limit]
+    else:
+        # Sort by tunnel priority (notebooks with tunnels first)
+        all_items = _sort_notebook_items_by_tunnel_priority(all_items, tunneled_ids)
+
+    _print_notebook_list(all_items, json_output, columns=columns, tunnel_config=tunnel_config)
 
 
 @click.command("ssh")

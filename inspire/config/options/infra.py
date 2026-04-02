@@ -128,10 +128,13 @@ BRIDGE_OPTIONS: list[ConfigOption] = [
 
 PATHS_OPTIONS: list[ConfigOption] = [
     ConfigOption(
-        env_var="INSPIRE_TARGET_DIR",
+        env_var="INSPIRE_TARGET_DIR_LEGACY",
         toml_key="paths.target_dir",
         field_name="target_dir",
-        description="Target directory on Bridge shared filesystem",
+        description=(
+            "Legacy target directory on Bridge shared filesystem "
+            "(deprecated: use defaults.target_dir and INSPIRE_TARGET_DIR)"
+        ),
         default=None,
         category="Paths",
         scope="project",

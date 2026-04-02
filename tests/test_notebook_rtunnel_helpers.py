@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from pathlib import Path
 
@@ -137,20 +138,11 @@ def test_create_terminal_via_api_failure_status() -> None:
     assert result is None
 
 
-def test_create_terminal_via_api_exception() -> None:
+@pytest.mark.parametrize("exc_type", [ConnectionError, rtunnel_module.PlaywrightError])
+def test_create_terminal_via_api_exception(exc_type: type[Exception]) -> None:
     class _BrokenRequest:
         def post(self, url: str, headers: dict | None = None, timeout: int = 0) -> None:
-            raise ConnectionError("network failure")
-
-    ctx = _DummyContext(_BrokenRequest())  # type: ignore[arg-type]
-    result = _create_terminal_via_api(ctx, "https://nb.example.com/lab")
-    assert result is None
-
-
-def test_create_terminal_via_api_playwright_exception() -> None:
-    class _BrokenRequest:
-        def post(self, url: str, headers: dict | None = None, timeout: int = 0) -> None:
-            raise rtunnel_module.PlaywrightError("request failed")
+            raise exc_type("request failed")
 
     ctx = _DummyContext(_BrokenRequest())  # type: ignore[arg-type]
     result = _create_terminal_via_api(ctx, "https://nb.example.com/lab")
@@ -284,24 +276,11 @@ def test_send_terminal_command_via_websocket_success() -> None:
     assert captured["payload"]["promptTimeoutMs"] == 734
 
 
-def test_send_terminal_command_via_websocket_exception() -> None:
+@pytest.mark.parametrize("exc_type", [RuntimeError, rtunnel_module.PlaywrightError])
+def test_send_terminal_command_via_websocket_exception(exc_type: type[Exception]) -> None:
     class _BrokenPage:
         def evaluate(self, script: str, payload: dict):  # noqa: ANN201
-            raise RuntimeError("eval failed")
-
-    page = _BrokenPage()
-    result = _send_terminal_command_via_websocket(
-        page,
-        ws_url="wss://example.test/terminals/websocket/1",
-        command="echo hi",
-    )
-    assert result is False
-
-
-def test_send_terminal_command_via_websocket_playwright_exception() -> None:
-    class _BrokenPage:
-        def evaluate(self, script: str, payload: dict):  # noqa: ANN201
-            raise rtunnel_module.PlaywrightError("eval failed")
+            raise exc_type("eval failed")
 
     page = _BrokenPage()
     result = _send_terminal_command_via_websocket(
@@ -944,7 +923,7 @@ def test_build_rtunnel_setup_commands_gates_network_calls_on_inet_probe() -> Non
     assert "_INET=0; timeout 3 bash -c 'exec 3<>/dev/tcp/archive.ubuntu.com/80'" in script
     assert 'if [ ! -x "$RTUNNEL_BIN" ] && [ "$_INET" = 1 ]; then curl -fsSL ' in script
     assert (
-        "timeout 30 apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=10 " "update -qq"
+        "timeout 30 apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=10 update -qq"
     ) in script
     assert "timeout 30 apt-get install -y -qq openssh-server" in script
 
@@ -1078,14 +1057,13 @@ def test_wait_for_setup_completion_uses_longer_settle_for_browser_path() -> None
 # ---------------------------------------------------------------------------
 
 
-def test_step_timer_disabled_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
+def test_step_timer_disabled_is_silent(caplog: pytest.CaptureFixture[str]) -> None:
     timer = _StepTimer(enabled=False)
-    timer.mark("a")
-    timer.mark("b")
-    timer.summary()
-    captured = capsys.readouterr()
-    assert captured.err == ""
-    assert captured.out == ""
+    with caplog.at_level(logging.DEBUG, logger="inspire.platform.web.browser_api.rtunnel"):
+        timer.mark("a")
+        timer.mark("b")
+        timer.summary()
+    assert not caplog.records
 
 
 def test_step_timer_mark_returns_elapsed() -> None:
@@ -1095,37 +1073,34 @@ def test_step_timer_mark_returns_elapsed() -> None:
     assert isinstance(result, float)
 
 
-def test_step_timer_records_steps(capsys: pytest.CaptureFixture[str]) -> None:
+def test_step_timer_records_steps(caplog: pytest.CaptureFixture[str]) -> None:
     timer = _StepTimer(enabled=True)
-    timer.mark("alpha")
-    timer.mark("beta")
-    captured = capsys.readouterr()
-    assert "[timing] alpha:" in captured.err
-    assert "[timing] beta:" in captured.err
+    with caplog.at_level(logging.DEBUG, logger="inspire.platform.web.browser_api.rtunnel"):
+        timer.mark("alpha")
+        timer.mark("beta")
+    assert "[timing] alpha:" in caplog.text
+    assert "[timing] beta:" in caplog.text
 
 
-def test_step_timer_summary_format(capsys: pytest.CaptureFixture[str]) -> None:
+def test_step_timer_summary_format(caplog: pytest.CaptureFixture[str]) -> None:
     timer = _StepTimer(enabled=True)
-    timer.mark("step_one")
-    timer.mark("step_two")
-    _ = capsys.readouterr()  # discard mark output
-
-    timer.summary()
-    captured = capsys.readouterr()
-    assert "step_one" in captured.err
-    assert "step_two" in captured.err
-    assert "%" in captured.err
-    assert "TOTAL" in captured.err
+    with caplog.at_level(logging.DEBUG, logger="inspire.platform.web.browser_api.rtunnel"):
+        timer.mark("step_one")
+        timer.mark("step_two")
+        timer.summary()
+    assert "step_one" in caplog.text
+    assert "step_two" in caplog.text
+    assert "%" in caplog.text
+    assert "TOTAL" in caplog.text
 
 
 def test_step_timer_summary_empty_when_no_steps(
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.CaptureFixture[str],
 ) -> None:
     timer = _StepTimer(enabled=True)
-    timer.summary()
-    captured = capsys.readouterr()
-    assert captured.err == ""
-    assert captured.out == ""
+    with caplog.at_level(logging.DEBUG, logger="inspire.platform.web.browser_api.rtunnel"):
+        timer.summary()
+    assert not caplog.records
 
 
 # ---------------------------------------------------------------------------
@@ -1864,8 +1839,10 @@ def test_send_setup_command_via_terminal_ws_propagates_detected_errors(
 # ---------------------------------------------------------------------------
 
 
-def test_send_terminal_command_logs_diagnostics_on_failure(capsys: pytest.CaptureFixture) -> None:
-    """When WS returns {ok: False, diagnostics: {...}}, diagnostics are logged to stderr."""
+def test_send_terminal_command_logs_diagnostics_on_failure(
+    caplog: pytest.CaptureFixture[str],
+) -> None:
+    """When WS returns {ok: False, diagnostics: {...}}, diagnostics are logged."""
     diag = {
         "wsConnected": True,
         "promptDetected": False,
@@ -1877,20 +1854,22 @@ def test_send_terminal_command_logs_diagnostics_on_failure(capsys: pytest.Captur
         "elapsed": 5000,
     }
     page = _make_eval_page({"ok": False, "errors": [], "diagnostics": diag})
-    result = _send_terminal_command_via_websocket(
-        page,
-        ws_url="wss://example.test/terminals/websocket/1",
-        command="echo hi",
-    )
+    with caplog.at_level(logging.INFO, logger="inspire.platform.web.browser_api.rtunnel"):
+        result = _send_terminal_command_via_websocket(
+            page,
+            ws_url="wss://example.test/terminals/websocket/1",
+            command="echo hi",
+        )
     assert result is False
-    captured = capsys.readouterr()
-    assert "ws-diagnostics" in captured.err
-    assert "wsConnected=True" in captured.err
-    assert "promptDetected=False" in captured.err
-    assert "wsCloseCode=1006" in captured.err
+    assert "ws-diagnostics" in caplog.text
+    assert "wsConnected=True" in caplog.text
+    assert "promptDetected=False" in caplog.text
+    assert "wsCloseCode=1006" in caplog.text
 
 
-def test_send_terminal_command_no_diagnostics_on_success(capsys: pytest.CaptureFixture) -> None:
+def test_send_terminal_command_no_diagnostics_on_success(
+    caplog: pytest.CaptureFixture[str],
+) -> None:
     """When WS returns {ok: True, diagnostics: {...}}, no diagnostics are logged."""
     diag = {
         "wsConnected": True,
@@ -1903,14 +1882,14 @@ def test_send_terminal_command_no_diagnostics_on_success(capsys: pytest.CaptureF
         "elapsed": 3000,
     }
     page = _make_eval_page({"ok": True, "errors": [], "diagnostics": diag})
-    result = _send_terminal_command_via_websocket(
-        page,
-        ws_url="wss://example.test/terminals/websocket/1",
-        command="echo hi",
-    )
+    with caplog.at_level(logging.INFO, logger="inspire.platform.web.browser_api.rtunnel"):
+        result = _send_terminal_command_via_websocket(
+            page,
+            ws_url="wss://example.test/terminals/websocket/1",
+            command="echo hi",
+        )
     assert result is True
-    captured = capsys.readouterr()
-    assert "ws-diagnostics" not in captured.err
+    assert "ws-diagnostics" not in caplog.text
 
 
 def test_send_terminal_command_no_diagnostics_key_still_works() -> None:

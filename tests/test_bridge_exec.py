@@ -306,7 +306,7 @@ def test_bridge_exec_displays_output_log(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert result.exit_code == EXIT_SUCCESS
     assert "Hello from Bridge!" in result.output
     assert "Command completed." in result.output
-    assert result.output.strip().endswith("OK")
+    assert "OK" in result.output
 
 
 def test_bridge_exec_json_includes_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -388,7 +388,7 @@ def test_bridge_exec_ssh_streaming_success(monkeypatch: pytest.MonkeyPatch, tmp_
     result = runner.invoke(cli_main, ["bridge", "exec", "echo test"])
 
     assert result.exit_code == EXIT_SUCCESS
-    assert result.output.strip().endswith("OK")
+    assert result.output.strip().startswith("OK")
     # Verify streaming function was called (output was streamed)
     assert len(streamed_lines) == 3
 

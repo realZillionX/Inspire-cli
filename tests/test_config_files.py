@@ -1,5 +1,6 @@
 """Tests for TOML config file loading and layered configuration."""
 
+import importlib
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from inspire.config import (
     ConfigError,
     SOURCE_DEFAULT,
     SOURCE_GLOBAL,
+    SOURCE_INFERRED,
     SOURCE_PROJECT,
     SOURCE_ENV,
     PROJECT_CONFIG_DIR,
@@ -35,7 +37,14 @@ from inspire.cli.commands.init import (
     _generate_toml_content,
 )
 from inspire.cli.commands.init.discover import _write_discovered_project_config
+from inspire.cli.commands.init import discover as discover_module
+from inspire.cli.commands.init import wizard_discovery as wizard_discovery_module
+from inspire.cli.commands.init.init_cmd import _run_auto_validation
+from inspire.cli.commands.init import wizard as wizard_module
+from inspire.cli.commands.init.wizard import _create_config_files, _format_project_label
+from inspire.cli.commands.init.wizard_discovery import run_discovery_for_wizard
 from inspire.cli.commands.config import config as config_command
+from inspire.cli.context import Context
 
 # ===========================================================================
 # Config Schema tests
@@ -69,6 +78,19 @@ class TestConfigSchema:
         opt = get_option_by_toml("auth.username")
         assert opt is not None
         assert opt.env_var == "INSPIRE_USERNAME"
+
+    def test_target_dir_env_maps_to_defaults_key(self) -> None:
+        """Test canonical target_dir env mapping and legacy TOML compatibility."""
+        canonical = get_option_by_env("INSPIRE_TARGET_DIR")
+        assert canonical is not None
+        assert canonical.toml_key == "defaults.target_dir"
+
+        legacy = get_option_by_toml("paths.target_dir")
+        assert legacy is not None
+        assert legacy.env_var == "INSPIRE_TARGET_DIR_LEGACY"
+
+        canonical_count = sum(1 for opt in CONFIG_OPTIONS if opt.env_var == "INSPIRE_TARGET_DIR")
+        assert canonical_count == 1
 
     def test_get_option_not_found(self) -> None:
         """Test getting non-existent option."""
@@ -226,6 +248,218 @@ timeout = 60
         assert Config._toml_key_to_field("notebook.shm_size") == "notebook_shm_size"
         assert Config._toml_key_to_field("nonexistent.key") is None
 
+    def test_wizard_create_config_files_uses_account_scoped_workspaces(
+        self, tmp_path: Path
+    ) -> None:
+        global_path = tmp_path / "global.toml"
+        project_path = tmp_path / "project.toml"
+
+        _create_config_files(
+            global_path=global_path,
+            project_path=project_path,
+            credentials=("wizard-user", "secret", "https://example.invalid"),
+            project_order=["project-a", "project-b"],
+            target_dir="/shared/path",
+            discover_results={
+                "workspaces": {
+                    "cpu": "ws-cpu",
+                    "gpu": "ws-gpu",
+                },
+                "compute_groups": [
+                    {
+                        "id": "cg-h200",
+                        "name": "H200-1号机房",
+                        "gpu_type": "H200",
+                        "location": "Room 1",
+                        "workspace_ids": ["ws-gpu"],
+                    }
+                ],
+            },
+        )
+
+        global_data = Config._load_toml(global_path)
+        project_data = Config._load_toml(project_path)
+
+        assert "workspaces" not in global_data
+        account = global_data["accounts"]["wizard-user"]
+        assert account["password"] == "secret"
+        assert account["workspaces"]["cpu"] == "ws-cpu"
+        assert account["workspaces"]["gpu"] == "ws-gpu"
+        assert global_data["compute_groups"][0]["workspace_ids"] == ["ws-gpu"]
+
+        assert project_data["auth"]["username"] == "wizard-user"
+        assert project_data["defaults"]["project_order"] == ["project-a", "project-b"]
+        assert project_data["defaults"]["target_dir"] == "/shared/path"
+
+    def test_wizard_project_label_prefers_quota_and_budget_metadata(self) -> None:
+        label = _format_project_label(
+            {
+                "name": "Project One",
+                "gpu_limit": True,
+                "member_gpu_limit": True,
+                "member_remain_gpu_hours": 123.4,
+                "member_remain_budget": 5678,
+            }
+        )
+
+        assert label == "Project One (member GPU hrs: 123.4, my budget: 5,678)"
+
+    def test_wizard_discovery_collects_workspace_bound_compute_groups(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from inspire.platform.web import browser_api as browser_api_module
+        from inspire.platform.web.browser_api import core as browser_core_module
+        from inspire.platform.web.browser_api import workspaces as browser_workspaces_module
+        from inspire.platform.web import session as web_session_module
+
+        monkeypatch.setattr(
+            browser_core_module,
+            "_set_base_url",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            web_session_module,
+            "login_with_playwright",
+            lambda *_args, **_kwargs: SimpleNamespace(workspace_id="ws-cpu"),
+        )
+        monkeypatch.setattr(
+            browser_workspaces_module,
+            "try_enumerate_workspaces",
+            lambda _session, base_url=None, workspace_id=None: [
+                {"id": "ws-cpu", "name": "CPU Workspace"},
+                {"id": "ws-gpu", "name": "GPU Workspace"},
+            ],
+        )
+        monkeypatch.setattr(
+            browser_api_module,
+            "list_projects",
+            lambda workspace_id=None, session=None: [
+                browser_api_module.ProjectInfo(
+                    project_id="project-1",
+                    name="Project One",
+                    workspace_id=workspace_id or "ws-cpu",
+                )
+            ],
+        )
+
+        def _fake_list_compute_groups(*, workspace_id: str, session):  # noqa: ANN001
+            if workspace_id == "ws-cpu":
+                return [
+                    {"logic_compute_group_id": "cg-cpu", "name": "CPU资源"},
+                    {"logic_compute_group_id": "cg-shared", "name": "H200 Shared"},
+                ]
+            if workspace_id == "ws-gpu":
+                return [{"logic_compute_group_id": "cg-shared", "name": "H200 Shared"}]
+            return []
+
+        monkeypatch.setattr(
+            browser_api_module,
+            "list_compute_groups",
+            _fake_list_compute_groups,
+        )
+        monkeypatch.setattr(
+            browser_api_module,
+            "get_accurate_gpu_availability",
+            lambda *, workspace_id, session: (
+                [SimpleNamespace(group_id="cg-shared", gpu_type="H200")]
+                if workspace_id == "ws-gpu"
+                else []
+            ),
+        )
+
+        results = run_discovery_for_wizard(
+            username="wizard-user",
+            password="secret",
+            base_url="https://example.invalid",
+        )
+
+        assert results is not None
+        assert results["success"] is True
+        assert results["workspaces"]["cpu"] == "ws-cpu"
+        assert results["workspaces"]["gpu"] == "ws-gpu"
+        assert results["projects"][0]["id"] == "project-1"
+        assert results["projects"][0]["name"] == "Project One"
+        assert results["projects"][0]["gpu_limit"] is False
+        assert results["projects"][0]["member_gpu_limit"] is False
+
+        groups_by_id = {item["id"]: item for item in results["compute_groups"]}
+        assert groups_by_id["cg-cpu"]["workspace_ids"] == ["ws-cpu"]
+        assert groups_by_id["cg-shared"]["workspace_ids"] == ["ws-cpu", "ws-gpu"]
+        assert groups_by_id["cg-shared"]["gpu_type"] == "H200"
+
+    def test_run_wizard_cancellation_during_project_selection_aborts_without_writing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        global_path = tmp_path / "global.toml"
+        project_path = tmp_path / "project.toml"
+        created: dict[str, bool] = {"called": False}
+
+        monkeypatch.setattr(wizard_module, "_check_existing_configs", lambda *args, **kwargs: True)
+        monkeypatch.setattr(
+            wizard_module,
+            "_prompt_credentials",
+            lambda: ("wizard-user", "secret", "https://example.invalid"),
+        )
+        monkeypatch.setattr(wizard_module, "_prompt_discovery", lambda: True)
+        monkeypatch.setattr(
+            wizard_module,
+            "_prompt_project_ranking",
+            lambda _projects: (_ for _ in ()).throw(wizard_module._WizardCancelled()),
+        )
+        monkeypatch.setattr(wizard_module, "_prompt_target_dir", lambda default=None: "/unused")
+        monkeypatch.setattr(
+            wizard_discovery_module,
+            "run_discovery_for_wizard",
+            lambda **kwargs: {
+                "success": True,
+                "projects": [{"id": "project-1", "name": "Project One"}],
+            },
+        )
+
+        def _fake_create(*args, **kwargs) -> None:
+            created["called"] = True
+
+        monkeypatch.setattr(wizard_module, "_create_config_files", _fake_create)
+
+        result = wizard_module.run_wizard(global_path, project_path, force=True, yes=True)
+
+        assert result is False
+        assert created["called"] is False
+        assert not global_path.exists()
+        assert not project_path.exists()
+
+    def test_run_wizard_cancellation_during_target_dir_aborts_without_writing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        global_path = tmp_path / "global.toml"
+        project_path = tmp_path / "project.toml"
+        created: dict[str, bool] = {"called": False}
+
+        monkeypatch.setattr(wizard_module, "_check_existing_configs", lambda *args, **kwargs: True)
+        monkeypatch.setattr(
+            wizard_module,
+            "_prompt_credentials",
+            lambda: ("wizard-user", "secret", "https://example.invalid"),
+        )
+        monkeypatch.setattr(wizard_module, "_prompt_discovery", lambda: False)
+        monkeypatch.setattr(
+            wizard_module,
+            "_prompt_target_dir",
+            lambda default=None: (_ for _ in ()).throw(wizard_module._WizardCancelled()),
+        )
+
+        def _fake_create(*args, **kwargs) -> None:
+            created["called"] = True
+
+        monkeypatch.setattr(wizard_module, "_create_config_files", _fake_create)
+
+        result = wizard_module.run_wizard(global_path, project_path, force=True, yes=True)
+
+        assert result is False
+        assert created["called"] is False
+        assert not global_path.exists()
+        assert not project_path.exists()
+
 
 # ===========================================================================
 # Layered config tests
@@ -269,6 +503,21 @@ class TestLayeredConfig:
         assert cfg.timeout == 30
         assert sources["base_url"] == SOURCE_DEFAULT
         assert sources["timeout"] == SOURCE_DEFAULT
+
+    def test_require_target_dir_error_references_defaults_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        """Test missing target_dir error references defaults.target_dir."""
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "nonexistent" / "config.toml")
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(ConfigError) as exc_info:
+            Config.from_files_and_env(require_credentials=False, require_target_dir=True)
+
+        message = str(exc_info.value)
+        assert "[defaults]" in message
+        assert "target_dir" in message
+        assert "[paths]" not in message
 
     def test_from_files_and_env_global_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
@@ -1046,11 +1295,11 @@ class TestInitCommand:
         global_data = Config._load_toml(global_config)
         account = global_data["accounts"]["testuser"]
         assert global_data["api"]["base_url"] == "https://example.invalid"
-        assert global_data["workspaces"]["cpu"] == workspace_id
-        assert global_data["workspaces"]["gpu"] == workspace_id
-        assert global_data["workspaces"]["internet"] == workspace_id
+        assert "workspaces" not in global_data
         assert "api" not in account
-        assert "workspaces" not in account
+        assert account["workspaces"]["cpu"] == workspace_id
+        assert account["workspaces"]["gpu"] == workspace_id
+        assert account["workspaces"]["internet"] == workspace_id
         assert "compute_groups" not in account
         assert account["projects"]["over-quota"] == "project-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         assert account["projects"]["good-project"] == "project-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -1140,6 +1389,91 @@ class TestInitCommand:
         project_catalog = account["project_catalog"]
         assert "project-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" in project_catalog
         assert "project-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" in project_catalog
+
+    def test_init_discover_is_idempotent_and_preserves_user_managed_sections(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        global_config, workspace_id = self._setup_discover_mocks(monkeypatch, tmp_path)
+        monkeypatch.setenv("INSPIRE_USERNAME", "testuser")
+        monkeypatch.setenv("INSPIRE_BASE_URL", "https://example.invalid")
+
+        global_config.parent.mkdir(parents=True, exist_ok=True)
+        global_config.write_text(
+            """
+[api]
+base_url = "https://example.invalid"
+timeout = 99
+
+[remote_env]
+PIP_INDEX_URL = "https://mirror.example/simple"
+
+[ssh]
+rtunnel_bin = "/custom/rtunnel"
+setup_script = "/custom/setup.sh"
+
+[[compute_groups]]
+id = "lcg-1"
+name = "H100 (CUDA 12.8)"
+gpu_type = "H100"
+workspace_ids = ["ws-11111111-1111-1111-1111-111111111111"]
+""".strip()
+        )
+
+        project_config = tmp_path / PROJECT_CONFIG_DIR / CONFIG_FILENAME
+        project_config.parent.mkdir(parents=True, exist_ok=True)
+        project_config.write_text(
+            """
+[cli]
+prefer_source = "toml"
+
+[auth]
+username = "testuser"
+
+[remote_env]
+HF_TOKEN = "project-secret"
+
+[defaults]
+target_dir = "/shared/custom-target"
+resource = "1xH100"
+""".strip()
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(init, ["--discover", "--force"])
+        assert result.exit_code == 0
+
+        first_global = global_config.read_text()
+        first_project = project_config.read_text()
+        first_global_data = Config._load_toml(global_config)
+        first_project_data = Config._load_toml(project_config)
+
+        assert first_global_data["api"]["timeout"] == 99
+        assert first_global_data["remote_env"]["PIP_INDEX_URL"] == "https://mirror.example/simple"
+        assert first_global_data["ssh"]["rtunnel_bin"] == "/custom/rtunnel"
+        assert first_global_data["ssh"]["setup_script"] == "/custom/setup.sh"
+        assert first_project_data["remote_env"]["HF_TOKEN"] == "project-secret"
+        assert first_project_data["defaults"]["target_dir"] == "/shared/custom-target"
+        assert first_project_data["defaults"]["resource"] == "1xH100"
+        assert first_global_data["accounts"]["testuser"]["workspaces"]["cpu"] == workspace_id
+
+        result = runner.invoke(init, ["--discover", "--force"])
+        assert result.exit_code == 0
+
+        second_global = global_config.read_text()
+        second_project = project_config.read_text()
+        second_global_data = Config._load_toml(global_config)
+        second_project_data = Config._load_toml(project_config)
+
+        assert second_global_data["api"]["timeout"] == 99
+        assert second_global_data["remote_env"]["PIP_INDEX_URL"] == "https://mirror.example/simple"
+        assert second_global_data["ssh"]["rtunnel_bin"] == "/custom/rtunnel"
+        assert second_global_data["ssh"]["setup_script"] == "/custom/setup.sh"
+        assert second_project_data["remote_env"]["HF_TOKEN"] == "project-secret"
+        assert second_project_data["defaults"]["target_dir"] == "/shared/custom-target"
+        assert second_project_data["defaults"]["resource"] == "1xH100"
+
+        assert second_global == first_global
+        assert second_project == first_project
 
     # ------------------------------------------------------------------
     # Helper to set up discover mocks shared across credential tests
@@ -1275,24 +1609,23 @@ class TestInitCommand:
         global_data = Config._load_toml(global_config)
         assert "cli-user" in global_data.get("accounts", {})
 
-    def test_discover_fallback_always_prompts_password(
+    def test_discover_fallback_reuses_stored_password_without_prompt(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
     ) -> None:
-        """Finding 2: password must always be prompted in the fallback path."""
+        """Fallback login should reuse the stored account password when it still works."""
         from inspire.platform.web.session.models import WebSession
+        import inspire.platform.web.session as web_session_module
 
         workspace_id = "ws-11111111-1111-1111-1111-111111111111"
         login_session = WebSession(
             storage_state={"cookies": [], "origins": []},
             created_at=0.0,
             workspace_id=workspace_id,
-            login_username="newuser",
+            login_username="testuser",
         )
 
-        # Even with INSPIRE_PASSWORD set, the interactive fallback should
-        # prompt again because the existing session failed.
-        monkeypatch.setenv("INSPIRE_PASSWORD", "old-stale-pw")
         monkeypatch.setenv("INSPIRE_BASE_URL", "https://example.invalid")
+        monkeypatch.setenv("INSPIRE_USERNAME", "testuser")
 
         global_config, _ = self._setup_discover_mocks(
             monkeypatch,
@@ -1300,26 +1633,104 @@ class TestInitCommand:
             get_web_session_side_effect=ValueError("Missing credentials"),
             login_session=login_session,
         )
+        global_config.parent.mkdir(parents=True, exist_ok=True)
+        global_config.write_text(
+            """
+[api]
+base_url = "https://example.invalid"
 
-        runner = CliRunner()
-        # Input provides: username, then password
-        result = runner.invoke(
-            init,
-            ["--discover", "--force"],
-            input="newuser\nfresh-password\n",
+[accounts."testuser"]
+password = "stored-password"
+""".strip()
         )
 
-        assert result.exit_code == 0
-        assert "Note: prompted account password was stored in global config" in result.output
-        # Verify the freshly prompted password (not the stale one) was persisted
-        global_data = Config._load_toml(global_config)
-        account = global_data["accounts"]["newuser"]
-        assert account["password"] == "fresh-password"
+        captured: dict[str, object] = {}
 
-    def test_discover_prompted_credentials_overwrite_stale_values(
+        def fake_login(username: str, password: str, *, base_url: str):
+            captured["username"] = username
+            captured["password"] = password
+            captured["base_url"] = base_url
+            return login_session
+
+        monkeypatch.setattr(web_session_module, "login_with_playwright", fake_login)
+
+        runner = CliRunner()
+        result = runner.invoke(init, ["--discover", "--force"])
+
+        assert result.exit_code == 0
+        assert "Platform URL" not in result.output
+        assert "Username" not in result.output
+        assert "Password" not in result.output
+        assert captured["username"] == "testuser"
+        assert captured["password"] == "stored-password"
+        assert captured["base_url"] == "https://example.invalid"
+
+        global_data = Config._load_toml(global_config)
+        assert global_data["accounts"]["testuser"]["password"] == "stored-password"
+
+    def test_discover_fallback_prompts_when_stored_password_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
     ) -> None:
-        """Finding 3: prompted credentials must overwrite existing config values."""
+        """Fallback login should prompt only after a stored password fails."""
+        from inspire.platform.web.session.models import WebSession
+        import inspire.platform.web.session as web_session_module
+
+        workspace_id = "ws-11111111-1111-1111-1111-111111111111"
+        login_session = WebSession(
+            storage_state={"cookies": [], "origins": []},
+            created_at=0.0,
+            workspace_id=workspace_id,
+            login_username="testuser",
+        )
+
+        monkeypatch.setenv("INSPIRE_BASE_URL", "https://example.invalid")
+        monkeypatch.setenv("INSPIRE_USERNAME", "testuser")
+
+        global_config, _ = self._setup_discover_mocks(
+            monkeypatch,
+            tmp_path,
+            get_web_session_side_effect=ValueError("Missing credentials"),
+            login_session=login_session,
+        )
+        global_config.parent.mkdir(parents=True, exist_ok=True)
+        global_config.write_text(
+            """
+[api]
+base_url = "https://example.invalid"
+
+[accounts."testuser"]
+password = "old-stale-pw"
+""".strip()
+        )
+
+        login_attempts: list[tuple[str, str, str]] = []
+
+        def fake_login(username: str, password: str, *, base_url: str):
+            login_attempts.append((username, password, base_url))
+            if password == "old-stale-pw":
+                raise ValueError("invalid password")
+            return login_session
+
+        monkeypatch.setattr(web_session_module, "login_with_playwright", fake_login)
+
+        runner = CliRunner()
+        result = runner.invoke(init, ["--discover", "--force"], input="fresh-password\n")
+
+        assert result.exit_code == 0
+        assert "Stored credentials failed; please enter the password again." in result.output
+        assert login_attempts == [
+            ("testuser", "old-stale-pw", "https://example.invalid"),
+            ("testuser", "fresh-password", "https://example.invalid"),
+        ]
+
+        global_data = Config._load_toml(global_config)
+        account = global_data["accounts"]["testuser"]
+        assert account["password"] == "fresh-password"
+
+    def test_discover_requires_explicit_account_when_single_account_is_inferred(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        """Discover should fail fast when account selection is only implicit inference."""
         from inspire.platform.web.session.models import WebSession
 
         workspace_id = "ws-11111111-1111-1111-1111-111111111111"
@@ -1347,16 +1758,18 @@ class TestInitCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(
-            init,
-            ["--discover", "--force", "--base-url", "https://new-url.invalid"],
-            input="testuser\nnew-password\n",
-        )
+        with pytest.warns(ConfigDeprecationWarning, match=r"inferred username"):
+            result = runner.invoke(
+                init,
+                ["--discover", "--force", "--base-url", "https://new-url.invalid"],
+                input="testuser\nnew-password\n",
+            )
 
-        assert result.exit_code == 0
+        assert result.exit_code != 0
+        assert "Discover requires an explicit account" in result.output
         global_data = Config._load_toml(global_config)
-        assert global_data["api"]["base_url"] == "https://new-url.invalid"
-        assert global_data["accounts"]["testuser"]["password"] == "new-password"
+        assert global_data["api"]["base_url"] == "https://old-url.invalid"
+        assert global_data["accounts"]["testuser"]["password"] == "old-password"
 
     def test_discover_probe_respects_limit_and_forwards_probe_flags(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
@@ -1841,6 +2254,28 @@ class TestMigrateCommandRemoved:
         assert "No such command" in result.output or "Error" in result.output
 
 
+def test_run_auto_validation_uses_plain_check_helper(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    check_module = importlib.import_module("inspire.cli.commands.config.check")
+
+    calls: dict[str, object] = {}
+
+    def fake_run(ctx: Context, *, json_output_local: bool) -> None:
+        calls["ctx"] = ctx
+        calls["json_output_local"] = json_output_local
+
+    monkeypatch.setattr(check_module, "_run_check_impl", fake_run)
+
+    ctx = Context()
+    _run_auto_validation(ctx)
+
+    captured = capsys.readouterr()
+    assert "Running automatic configuration validation..." in captured.out
+    assert calls["ctx"] is ctx
+    assert calls["json_output_local"] is False
+
+
 # ===========================================================================
 # prefer_source tests
 # ===========================================================================
@@ -2008,6 +2443,36 @@ prefer_source = "toml"
         assert cfg.timeout == 90
         assert sources["timeout"] == SOURCE_ENV
 
+    def test_prefer_source_toml_legacy_context_account_beats_env_username(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        """prefer_source='toml' should keep legacy project context account over env username."""
+        project_dir = tmp_path / ".inspire"
+        project_dir.mkdir()
+        project_config = project_dir / "config.toml"
+        project_config.write_text(
+            """
+[cli]
+prefer_source = "toml"
+
+[context]
+account = "toml-user"
+
+[accounts."toml-user"]
+password = "project-pass"
+"""
+        )
+
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "missing" / "config.toml")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("INSPIRE_USERNAME", "env-user")
+
+        with pytest.warns(ConfigDeprecationWarning, match=r"\[context\]\.account"):
+            cfg, sources = Config.from_files_and_env(require_credentials=False)
+
+        assert cfg.username == "toml-user"
+        assert sources["username"] == SOURCE_PROJECT
+
     def test_password_resolves_from_global_accounts_map(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
     ) -> None:
@@ -2044,6 +2509,62 @@ username = "toml-user"
         assert cfg.username == "toml-user"
         assert cfg.password == "global-pass"
         assert sources["password"] == SOURCE_GLOBAL
+
+    def test_single_global_account_infers_username(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        """A lone global [accounts] entry should be used as the active username."""
+        global_dir = tmp_path / "global"
+        global_dir.mkdir()
+        global_config = global_dir / "config.toml"
+        global_config.write_text(
+            """
+[accounts."toml-user"]
+password = "global-pass"
+"""
+        )
+
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", global_config)
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.warns(ConfigDeprecationWarning, match=r"inferred username"):
+            cfg, sources = Config.from_files_and_env(require_credentials=True)
+
+        assert cfg.username == "toml-user"
+        assert cfg.password == "global-pass"
+        assert sources["username"] == SOURCE_INFERRED
+        assert sources["password"] == SOURCE_GLOBAL
+
+    def test_env_username_does_not_load_single_account_metadata(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+    ) -> None:
+        """Env username should win before account-scoped metadata is applied."""
+        global_dir = tmp_path / "global"
+        global_dir.mkdir()
+        global_config = global_dir / "config.toml"
+        global_config.write_text(
+            """
+[accounts."bob"]
+password = "bob-pass"
+
+[accounts."bob".workspaces]
+gpu = "ws-bob-gpu"
+
+[accounts."bob".projects]
+demo = "project-bob"
+"""
+        )
+
+        monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", global_config)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("INSPIRE_USERNAME", "alice")
+
+        cfg, sources = Config.from_files_and_env(require_credentials=False)
+
+        assert cfg.username == "alice"
+        assert sources["username"] == SOURCE_ENV
+        assert cfg.workspaces == {}
+        assert cfg.projects == {}
 
     def test_password_resolves_from_project_accounts_map(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
@@ -2302,7 +2823,10 @@ project_id = "project-explicit"
         project_config = project_dir / "config.toml"
         project_config.write_text(
             """
-[workspaces]
+[auth]
+username = "test-user"
+
+[accounts."test-user".workspaces]
 gpu = "ws-12345678-1234-1234-1234-123456789012"
 
 [context]
@@ -2321,6 +2845,52 @@ workspace_gpu = "gpu"
 
         assert cfg.workspace_gpu_id == "ws-12345678-1234-1234-1234-123456789012"
         assert sources["workspace_gpu_id"] == SOURCE_PROJECT
+
+    def test_discover_workspace_aliases_migrate_legacy_global_workspaces(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        global_data = {
+            "workspaces": {
+                "cpu": "ws-global-cpu",
+                "gpu": "ws-global-gpu",
+            }
+        }
+        account_section = {
+            "workspaces": {
+                "gpu": "ws-account-gpu",
+            }
+        }
+        config = SimpleNamespace(
+            workspaces={},
+            workspace_cpu_id=None,
+            workspace_gpu_id=None,
+            workspace_internet_id=None,
+        )
+
+        monkeypatch.setattr(
+            discover_module,
+            "_discover_workspace_options",
+            lambda **kwargs: (["ws-global-cpu", "ws-account-gpu"], {}),
+        )
+        monkeypatch.setattr(
+            discover_module,
+            "_prompt_workspace_aliases",
+            lambda **kwargs: None,
+        )
+
+        merged = discover_module._persist_workspace_aliases(
+            global_data=global_data,
+            account_section=account_section,
+            config=config,
+            session=SimpleNamespace(all_workspace_ids=None, all_workspace_names=None),
+            workspace_id="ws-global-cpu",
+            force=True,
+        )
+
+        assert "workspaces" not in global_data
+        assert merged["cpu"] == "ws-global-cpu"
+        assert merged["gpu"] == "ws-account-gpu"
+        assert account_section["workspaces"] == merged
 
     def test_discover_writer_removes_legacy_context_account_and_project(
         self, tmp_path: Path
@@ -2353,6 +2923,71 @@ workspace_cpu = "old-cpu"
         assert "workspace_gpu =" not in content
         assert "workspace_internet =" not in content
         assert "[context]" not in content
+
+    def test_discover_writer_removes_legacy_project_workspaces_and_unbound_compute_groups(
+        self, tmp_path: Path
+    ) -> None:
+        project_path = tmp_path / ".inspire" / "config.toml"
+        project_path.parent.mkdir()
+        project_path.write_text(
+            """
+[auth]
+username = "old-user"
+
+[workspaces]
+cpu = "ws-legacy-cpu"
+
+[[compute_groups]]
+id = "lcg-legacy"
+name = "Legacy CPU"
+
+[defaults]
+target_dir = "/shared/custom-target"
+"""
+        )
+
+        cfg = Config(username="new-user", password="secret", target_dir="/shared/ignored")
+
+        _write_discovered_project_config(
+            project_path=project_path,
+            config=cfg,
+            account_key="new-user",
+            target_dir=None,
+        )
+
+        project_data = Config._load_toml(project_path)
+        assert project_data["auth"]["username"] == "new-user"
+        assert "workspaces" not in project_data
+        assert "compute_groups" not in project_data
+        assert project_data["defaults"]["target_dir"] == "/shared/custom-target"
+
+    def test_discover_writer_preserves_bound_project_compute_groups(self, tmp_path: Path) -> None:
+        project_path = tmp_path / ".inspire" / "config.toml"
+        project_path.parent.mkdir()
+        project_path.write_text(
+            """
+[auth]
+username = "old-user"
+
+[[compute_groups]]
+id = "lcg-modern"
+name = "Modern Override"
+workspace_ids = ["ws-123"]
+"""
+        )
+
+        cfg = Config(username="new-user", password="secret")
+
+        _write_discovered_project_config(
+            project_path=project_path,
+            config=cfg,
+            account_key="new-user",
+            target_dir=None,
+        )
+
+        project_data = Config._load_toml(project_path)
+        assert project_data["compute_groups"][0]["id"] == "lcg-modern"
+        assert project_data["compute_groups"][0]["workspace_ids"] == ["ws-123"]
 
     def test_password_env_used_when_global_account_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None

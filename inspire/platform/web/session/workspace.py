@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .models import WebSession
+
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_node_specs(
@@ -41,6 +45,7 @@ def fetch_workspace_availability(
     *,
     request_json_fn: Callable[..., dict],
     base_url: str = "https://api.example.com",
+    workspace_id: str | None = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> list[dict]:
     """Fetch workspace-specific GPU availability.
@@ -66,14 +71,15 @@ def fetch_workspace_availability(
         if not session.cookies:
             raise ValueError("Session expired or invalid (missing storage state)")
 
-    if not session.workspace_id:
+    resolved_workspace_id = str(workspace_id or session.workspace_id or "").strip()
+    if not resolved_workspace_id:
         raise ValueError("No workspace_id in session. Please login again.")
 
     url = f"{base_url}/api/v1/cluster_nodes/list"
     body = {
         "page_num": 1,
         "page_size": -1,  # Get all nodes
-        "filter": {},  # No filter to get all workspace nodes
+        "filter": {"workspace_id": resolved_workspace_id},
     }
 
     data = request_json_fn(
@@ -161,7 +167,7 @@ def fetch_gpu_availability(
 
         except Exception as e:
             # Skip groups that fail
-            print(f"Warning: Failed to fetch {group_id}: {e}")
+            logger.warning("Failed to fetch compute group %s: %s", group_id, e)
             continue
 
     return results
