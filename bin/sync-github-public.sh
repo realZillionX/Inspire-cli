@@ -61,7 +61,7 @@ guard_no_stale_allowlist_files() {
   local index_files
   source_files="$(mktemp)"
   index_files="$(mktemp)"
-  trap 'rm -f "$source_files" "$index_files"' RETURN
+  trap 'rm -f "${source_files:-}" "${index_files:-}"' RETURN
 
   git ls-tree -r --name-only "$SOURCE_REF" -- "${ALLOWLIST[@]}" | LC_ALL=C sort >"$source_files"
   git ls-files -- "${ALLOWLIST[@]}" | LC_ALL=C sort >"$index_files"
