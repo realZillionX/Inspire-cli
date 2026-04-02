@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from click.testing import CliRunner
 
 from inspire.cli.context import EXIT_CONFIG_ERROR
+from inspire.cli.main import main as cli_main
 
 select_module = importlib.import_module("inspire.cli.commands.project.select")
 select_projects = select_module.select_projects
@@ -41,7 +42,7 @@ def test_project_select_json_reports_current_order(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(select_module, "_find_project_config", lambda: project_path)
 
     runner = CliRunner()
-    result = runner.invoke(select_projects, ["--json"])
+    result = runner.invoke(cli_main, ["--json", "project", "select"])
 
     assert result.exit_code == 0
     payload = json.loads(result.output)

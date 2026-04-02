@@ -6,7 +6,6 @@ attaches file handlers for all ``inspire.*`` loggers.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import platform
@@ -16,8 +15,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
-
-import click
 
 from inspire import __version__
 
@@ -49,6 +46,8 @@ _SENSITIVE_FIELD_RE = re.compile(
 _QUERY_TOKEN_RE = re.compile(r"(?i)([?&](?:token|access_token|refresh_token)=)([^&\s]+)")
 _PATH_TOKEN_RE = re.compile(r"(/(?:jupyter|vscode)/[^/]+/)([^/]+)(/proxy/)")
 _AUTH_BEARER_RE = re.compile(r"(?i)(authorization\s*[:=]\s*)(bearer|token)\s+([^\s,]+)")
+
+_JSON_HANDLER_MARKER = "_inspire_json_mode_handler"
 
 
 def redact_text(text: str) -> str:
@@ -112,6 +111,7 @@ def clear_debug_logging() -> None:
     """Detach and close existing debug handlers from the ``inspire`` logger."""
     inspire_logger = logging.getLogger("inspire")
     _remove_previous_debug_handlers(inspire_logger)
+    _remove_json_mode_handlers(inspire_logger)
     _restore_logger_state(inspire_logger)
 
 
@@ -197,42 +197,29 @@ def configure_debug_logging(
         return None
 
 
-class _JsonModeHandler(logging.Handler):
-    """Route INFO+ records to structured JSON on stderr."""
-
-    def __init__(self) -> None:
-        super().__init__(level=logging.INFO)
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = record.getMessage()
-            if record.levelno >= logging.ERROR:
-                output = {
-                    "success": False,
-                    "error": {
-                        "type": record.levelname,
-                        "code": 1,
-                        "message": msg,
-                    },
-                }
-            else:
-                key = "warning" if record.levelno == logging.WARNING else "info"
-                output = {key: msg}
-            json_str = json.dumps(output, indent=2, ensure_ascii=False)
-            click.echo(json_str, err=True)
-        except Exception:
-            self.handleError(record)
+def _remove_json_mode_handlers(logger: logging.Logger) -> None:
+    for handler in list(logger.handlers):
+        if getattr(handler, _JSON_HANDLER_MARKER, False):
+            logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
 
 
 def _configure_json_logging() -> None:
     """Configure logging for JSON output mode.
 
-    Sets the inspire logger to INFO (suppresses DEBUG) and attaches a JSON
-    handler that routes INFO+ to structured JSON on stderr.
+    Suppresses terminal log emission so ``--json`` command output stays machine
+    readable. Human-readable diagnostics should go through explicit emit helpers.
     """
     inspire_logger = logging.getLogger("inspire")
-    inspire_logger.setLevel(logging.INFO)
-    inspire_logger.addHandler(_JsonModeHandler())
+    _stash_logger_state(inspire_logger)
+    _remove_json_mode_handlers(inspire_logger)
+    sink_handler = logging.NullHandler()
+    setattr(sink_handler, _JSON_HANDLER_MARKER, True)
+    inspire_logger.addHandler(sink_handler)
+    inspire_logger.propagate = False
 
 
 __all__ = [

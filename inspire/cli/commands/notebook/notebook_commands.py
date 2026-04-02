@@ -127,12 +127,6 @@ from inspire.platform.web.browser_api import NotebookFailedError
     help="Local shell script to upload and run in the notebook after RUNNING",
 )
 @click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
-@click.option(
     "--priority",
     type=click.IntRange(1, 10),
     default=None,
@@ -154,7 +148,6 @@ def create_notebook_cmd(
     wait: bool,
     post_start: Optional[str],
     post_start_script: Optional[Path],
-    json_output: bool,
     priority: Optional[int],
 ) -> None:
     """Create a new interactive notebook instance.
@@ -176,6 +169,8 @@ def create_notebook_cmd(
     """
     if post_start and post_start_script:
         raise click.UsageError("Use either --post-start or --post-start-script, not both.")
+
+    json_output = resolve_json_output(ctx, False)
 
     project_explicit = bool(project)
 
@@ -202,17 +197,10 @@ def create_notebook_cmd(
 
 @click.command("stop")
 @click.argument("notebook")
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def stop_notebook_cmd(
     ctx: Context,
     notebook: str,
-    json_output: bool,
 ) -> None:
     """Stop a running notebook instance.
 
@@ -220,7 +208,7 @@ def stop_notebook_cmd(
     Examples:
         inspire notebook stop abc123-def456
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -283,12 +271,6 @@ def stop_notebook_cmd(
     default=None,
     help="Local shell script to upload and run in the notebook after RUNNING",
 )
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def start_notebook_cmd(
     ctx: Context,
@@ -296,7 +278,6 @@ def start_notebook_cmd(
     wait: bool,
     post_start: Optional[str],
     post_start_script: Optional[Path],
-    json_output: bool,
 ) -> None:
     """Start a stopped notebook instance.
 
@@ -312,7 +293,7 @@ def start_notebook_cmd(
     if post_start and post_start_script:
         raise click.UsageError("Use either --post-start or --post-start-script, not both.")
 
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -415,17 +396,10 @@ def start_notebook_cmd(
 
 @click.command("status")
 @click.argument("notebook")
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def notebook_status(
     ctx: Context,
     notebook: str,
-    json_output: bool,
 ) -> None:
     """Get status of a notebook instance.
 
@@ -433,7 +407,7 @@ def notebook_status(
     Examples:
         inspire notebook status notebook-abc-123
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -549,12 +523,6 @@ def notebook_status(
     help="Filter by notebook name (keyword search)",
 )
 @click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
-@click.option(
     "--columns",
     "-c",
     default="name,status,resource",
@@ -570,7 +538,6 @@ def list_notebooks(
     limit: int,
     status: tuple[str, ...],
     keyword: str,
-    json_output: bool,
     columns: str,
     tunneled: bool,
 ) -> None:
@@ -590,11 +557,11 @@ def list_notebooks(
         inspire notebook list --name my-notebook
         inspire notebook list --workspace gpu -s RUNNING -n 5
         inspire notebook list --all-workspaces
-        inspire notebook list --json
+        inspire --json notebook list
         inspire notebook list -c name,status,tunnel
         inspire notebook list -c name,status,gpu,uptime
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,

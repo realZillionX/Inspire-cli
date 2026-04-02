@@ -36,6 +36,7 @@ from inspire.cli.commands.init import (
     _derive_shared_path_group,
     _generate_toml_content,
 )
+from inspire.cli.main import main as cli_main
 from inspire.cli.commands.init.discover import _write_discovered_project_config
 from inspire.cli.commands.init import discover as discover_module
 from inspire.cli.commands.init import wizard_discovery as wizard_discovery_module
@@ -936,11 +937,11 @@ class TestInitCommand:
     def test_init_json_template_output(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that init supports command-local --json output."""
+        """Test that init supports global --json output."""
         monkeypatch.chdir(tmp_path)
         runner = CliRunner()
 
-        result = runner.invoke(init, ["--json", "--template", "--project", "--force"])
+        result = runner.invoke(cli_main, ["--json", "init", "--template", "--project", "--force"])
 
         assert result.exit_code == 0
         payload = json.loads(result.output)
@@ -960,7 +961,7 @@ class TestInitCommand:
         (config_dir / "config.toml").write_text("[auth]\nusername = 'existing'")
 
         runner = CliRunner()
-        result = runner.invoke(init, ["--json", "--template", "--project"])
+        result = runner.invoke(cli_main, ["--json", "init", "--template", "--project"])
 
         assert result.exit_code != 0
         payload = json.loads(result.output)
@@ -2161,14 +2162,14 @@ class TestConfigShowCommand:
         assert "INSPIRE_USERNAME" in data["values"]
 
     def test_config_show_json_alias(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test config show supports --json alias."""
+        """Test config show supports global --json output."""
         monkeypatch.setenv("INSPIRE_USERNAME", "testuser")
         monkeypatch.setenv("INSPIRE_PASSWORD", "testpass")
         monkeypatch.setattr(Config, "GLOBAL_CONFIG_PATH", tmp_path / "nonexistent" / "config.toml")
         monkeypatch.chdir(tmp_path)
 
         runner = CliRunner()
-        result = runner.invoke(config_command, ["show", "--json"])
+        result = runner.invoke(cli_main, ["--json", "config", "show"])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -2261,9 +2262,8 @@ def test_run_auto_validation_uses_plain_check_helper(
 
     calls: dict[str, object] = {}
 
-    def fake_run(ctx: Context, *, json_output_local: bool) -> None:
+    def fake_run(ctx: Context) -> None:
         calls["ctx"] = ctx
-        calls["json_output_local"] = json_output_local
 
     monkeypatch.setattr(check_module, "_run_check_impl", fake_run)
 
@@ -2273,7 +2273,66 @@ def test_run_auto_validation_uses_plain_check_helper(
     captured = capsys.readouterr()
     assert "Running automatic configuration validation..." in captured.out
     assert calls["ctx"] is ctx
-    assert calls["json_output_local"] is False
+
+
+def test_run_auto_validation_skips_in_json_mode(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    check_module = importlib.import_module("inspire.cli.commands.config.check")
+
+    called = {"value": False}
+
+    def fake_run(ctx: Context) -> None:
+        _ = ctx
+        called["value"] = True
+
+    monkeypatch.setattr(check_module, "_run_check_impl", fake_run)
+
+    ctx = Context()
+    ctx.json_output = True
+    _run_auto_validation(ctx)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert called["value"] is False
+
+
+def test_run_auto_validation_warns_on_system_exit(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    check_module = importlib.import_module("inspire.cli.commands.config.check")
+
+    def fake_run(ctx: Context) -> None:
+        _ = ctx
+        raise SystemExit(11)
+
+    monkeypatch.setattr(check_module, "_run_check_impl", fake_run)
+
+    ctx = Context()
+    _run_auto_validation(ctx)
+
+    captured = capsys.readouterr()
+    assert "Running automatic configuration validation..." in captured.out
+    assert "Validation could not complete" in captured.out
+
+
+def test_run_auto_validation_warns_on_exception(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    check_module = importlib.import_module("inspire.cli.commands.config.check")
+
+    def fake_run(ctx: Context) -> None:
+        _ = ctx
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(check_module, "_run_check_impl", fake_run)
+
+    ctx = Context()
+    _run_auto_validation(ctx)
+
+    captured = capsys.readouterr()
+    assert "Running automatic configuration validation..." in captured.out
+    assert "Warning: Automatic validation failed: boom" in captured.out
 
 
 # ===========================================================================

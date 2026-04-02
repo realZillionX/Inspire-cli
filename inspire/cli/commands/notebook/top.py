@@ -60,10 +60,7 @@ def _select_target_bridges(
             _handle_error(
                 ctx,
                 "ConfigError",
-                (
-                    f"Bridge '{bridge_name}' is not notebook-backed "
-                    "(missing notebook_id metadata)."
-                ),
+                (f"Bridge '{bridge_name}' is not notebook-backed (missing notebook_id metadata)."),
                 EXIT_CONFIG_ERROR,
                 hint="Recreate it with 'inspire notebook ssh <notebook-id> --save-as <name>'.",
             )
@@ -76,7 +73,7 @@ def _select_target_bridges(
             "ConfigError",
             "No notebook-backed tunnel profiles found.",
             EXIT_CONFIG_ERROR,
-            hint=("Create one first: " "'inspire notebook ssh <notebook-id> --save-as <name>'."),
+            hint=("Create one first: 'inspire notebook ssh <notebook-id> --save-as <name>'."),
         )
 
     return sorted(bridges, key=lambda b: b.name)
@@ -292,8 +289,7 @@ def _format_human_output(payload: dict[str, Any]) -> str:
             status = click.style("ok", fg="green")
             memory = f"{mem_used}/{mem_total} MiB ({mem_pct:.1f}%)"
             lines.append(
-                f"{bridge:<22} {notebook_id:<15} {gpus:>4} {util_avg:>7.1f}% "
-                f"{memory:>25} {status}"
+                f"{bridge:<22} {notebook_id:<15} {gpus:>4} {util_avg:>7.1f}% {memory:>25} {status}"
             )
             continue
 
@@ -334,12 +330,6 @@ def _format_human_output(payload: dict[str, Any]) -> str:
     is_flag=True,
     help="Skip tunnel preflight checks and run nvidia-smi directly.",
 )
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def notebook_top(
     ctx: Context,
@@ -347,10 +337,9 @@ def notebook_top(
     watch: bool,
     interval: float,
     no_check: bool,
-    json_output: bool,
 ) -> None:
     """Show GPU utilization and memory for tunnel-backed notebooks."""
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     if interval <= 0:
         _handle_error(

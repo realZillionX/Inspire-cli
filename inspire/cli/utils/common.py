@@ -2,30 +2,21 @@
 
 from __future__ import annotations
 
+import functools
 from typing import Any, Callable
-
-import click
 
 
 def json_option(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator that adds --json flag option to a Click command.
+    """Compatibility decorator for deprecated command-local JSON flags.
 
-    Use this instead of manually adding @click.option for --json.
-    The decorated function will receive json_output parameter.
-
-    Usage:
-        from inspire.cli.utils.common import json_option
-
-        @click.command()
-        @json_option
-        @pass_context
-        def my_command(ctx, json_output, ...):
-            json_output = resolve_json_output(ctx, json_output)
-            ...
+    ``--json`` is now global-only (for example ``inspire --json ...``), so
+    this decorator no longer registers a command-local Click option.
+    It only injects ``json_output=False`` for existing command signatures.
     """
-    return click.option(
-        "--json",
-        "json_output",
-        is_flag=True,
-        help="Alias for global --json",
-    )(func)
+
+    @functools.wraps(func)
+    def _wrapped(*args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("json_output", False)
+        return func(*args, **kwargs)
+
+    return _wrapped

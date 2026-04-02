@@ -12,6 +12,7 @@ from inspire.cli.context import (
     pass_context,
 )
 from inspire.cli.utils.errors import exit_with_error as _handle_error
+from inspire.cli.utils.notebook_cli import resolve_json_output
 from inspire.config import (
     CONFIG_FILENAME,
     PROJECT_CONFIG_DIR,
@@ -32,12 +33,6 @@ def _get_config_paths() -> tuple[Path, Path]:
 
 
 @click.command()
-@click.option(
-    "--json",
-    "json_output_local",
-    is_flag=True,
-    help="Output as JSON (machine-readable). Equivalent to top-level --json.",
-)
 @click.option(
     "--global",
     "-g",
@@ -145,7 +140,6 @@ def _get_config_paths() -> tuple[Path, Path]:
 @pass_context
 def init(
     ctx: Context,
-    json_output_local: bool,
     global_flag: bool,
     project_flag: bool,
     force: bool,
@@ -199,8 +193,7 @@ def init(
         # Discover projects/workspaces and write per-account catalog
         inspire init --discover
     """
-    ctx.json_output = bool(ctx.json_output or json_output_local)
-    effective_json = ctx.json_output
+    effective_json = resolve_json_output(ctx, False)
 
     global_path, project_path = _get_config_paths()
     before = snapshot_paths(global_path, project_path)
@@ -414,7 +407,7 @@ def _run_auto_validation(ctx: Context) -> None:
     try:
         from inspire.cli.commands.config.check import _run_check_impl
 
-        _run_check_impl(ctx, json_output_local=False)
+        _run_check_impl(ctx)
     except SystemExit as e:
         # check_config exits with non-zero on auth failure, which is expected
         # if user hasn't set up credentials yet

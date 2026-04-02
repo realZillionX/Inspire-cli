@@ -17,6 +17,7 @@ from inspire.cli.context import (
     pass_context,
 )
 from inspire.cli.utils.errors import exit_with_error as _handle_error
+from inspire.cli.utils.notebook_cli import resolve_json_output
 from inspire.cli.utils.output import emit_info, emit_success
 from inspire.config import Config, ConfigError, PROJECT_CONFIG_DIR
 from inspire.config.toml import _find_project_config
@@ -180,17 +181,10 @@ def _update_project_config(project_path: Path, project_order: list[str]) -> None
     is_flag=True,
     help="Clear project_order (no projects preferred)",
 )
-@click.option(
-    "--json",
-    "json_output_local",
-    is_flag=True,
-    help="Show current project_order as JSON",
-)
 @pass_context
 def select_projects(
     ctx: Context,
     reset: bool,
-    json_output_local: bool,
 ) -> None:
     """Interactively select and prioritize projects.
 
@@ -205,10 +199,9 @@ def select_projects(
     Examples:
         inspire project select              # Interactive selection
         inspire project select --reset      # Clear project_order
-        inspire project select --json       # Show current order as JSON
+        inspire --json project select       # Show current order as JSON
     """
-    ctx.json_output = bool(ctx.json_output or json_output_local)
-    effective_json = ctx.json_output
+    effective_json = resolve_json_output(ctx, False)
 
     try:
         config, _ = Config.from_files_and_env(require_credentials=False)
@@ -218,10 +211,10 @@ def select_projects(
             project_path = Path.cwd() / PROJECT_CONFIG_DIR / "config.toml"
 
         if reset:
+            _update_project_config(project_path, [])
             if effective_json:
                 click.echo(json.dumps({"project_order": [], "action": "reset"}))
             else:
-                _update_project_config(project_path, [])
                 emit_success(ctx, text="Project order cleared", payload={"project_order": []})
             return
 

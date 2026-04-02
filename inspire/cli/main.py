@@ -9,6 +9,8 @@ Usage:
 
 import logging
 import sys
+from typing import Sequence
+
 import click
 
 from inspire import __version__
@@ -18,6 +20,7 @@ from inspire.cli.logging_setup import (
     clear_debug_logging,
     configure_debug_logging,
 )
+from inspire.cli.formatters import json_formatter
 from inspire.cli.context import (
     Context,
     pass_context,
@@ -81,7 +84,6 @@ def main(ctx: Context, json_output: bool, debug: bool) -> None:
         inspire job logs job-abc-123 --tail 100
         inspire resources list
     """
-    ctx.json_output = json_output
     ctx.debug = debug
 
     if debug:
@@ -89,8 +91,25 @@ def main(ctx: Context, json_output: bool, debug: bool) -> None:
     else:
         clear_debug_logging()
 
-    if json_output:
+    click_ctx = click.get_current_context(silent=True)
+    if click_ctx is not None:
+        click_ctx.call_on_close(clear_debug_logging)
+
+    ctx.json_output = json_output
+    if ctx.json_output:
         _configure_json_logging()
+
+
+def _global_json_requested(argv: Sequence[str]) -> bool:
+    """Return whether the top-level ``--json`` flag is enabled."""
+    root_ctx = main.make_context(
+        "inspire",
+        list(argv),
+        resilient_parsing=True,
+        allow_extra_args=True,
+        ignore_unknown_options=True,
+    )
+    return bool(root_ctx.params.get("json_output"))
 
 
 # Register command groups
@@ -108,14 +127,43 @@ main.add_command(project)
 main.add_command(mount)
 
 
-def cli() -> None:
+def cli(argv: Sequence[str] | None = None) -> None:
     """Entry point for the CLI."""
+    run_argv = list(argv) if argv is not None else sys.argv[1:]
+    json_requested = _global_json_requested(run_argv)
+
     try:
-        main()
+        main.main(args=run_argv, prog_name="inspire", standalone_mode=False, obj=Context())
+    except click.ClickException as e:
+        if json_requested:
+            click.echo(
+                json_formatter.format_json_error(type(e).__name__, e.format_message(), e.exit_code),
+                err=True,
+            )
+        else:
+            e.show(file=sys.stderr)
+        sys.exit(e.exit_code)
+    except click.Abort:
+        if json_requested:
+            click.echo(
+                json_formatter.format_json_error("Abort", "Aborted!", EXIT_GENERAL_ERROR),
+                err=True,
+            )
+        else:
+            click.echo("Aborted!", err=True)
+        sys.exit(EXIT_GENERAL_ERROR)
     except Exception as e:  # pragma: no cover - top-level safety net
         logging.getLogger(__name__).exception("Unhandled exception in inspire CLI")
-        click.echo(f"Error: {e}", err=True)
+        if json_requested:
+            click.echo(
+                json_formatter.format_json_error("UnhandledError", str(e), EXIT_GENERAL_ERROR),
+                err=True,
+            )
+        else:
+            click.echo(f"Error: {e}", err=True)
         sys.exit(EXIT_GENERAL_ERROR)
+    finally:
+        clear_debug_logging()
 
 
 if __name__ == "__main__":  # pragma: no cover

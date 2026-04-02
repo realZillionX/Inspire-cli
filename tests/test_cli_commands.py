@@ -1586,8 +1586,8 @@ def test_tunnel_list_json_places_connected_bridges_first(monkeypatch: pytest.Mon
     assert names == ["alpha", "beta", "zeta"]
 
 
-def test_tunnel_list_json_local_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Test that local --json flag (after command) works, not just global flag."""
+def test_tunnel_list_json_local_flag_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Command-local --json is rejected; global --json remains supported."""
     from importlib import import_module
 
     list_cmd_module = import_module("inspire.cli.commands.tunnel.list_cmd")
@@ -1611,16 +1611,11 @@ def test_tunnel_list_json_local_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     )
 
     runner = CliRunner()
-    # Test LOCAL --json flag (after subcommand)
+    # Local --json after subcommand is invalid in global-only mode.
     result = runner.invoke(cli_main, ["tunnel", "list", "--json"])
 
-    assert result.exit_code == EXIT_SUCCESS
-    payload = json.loads(result.output)
-    bridges = payload.get("bridges")
-    if bridges is None:
-        bridges = payload.get("data", {}).get("bridges", [])
-    names = [item["name"] for item in bridges]
-    assert names == ["alpha", "beta", "zeta"]
+    assert result.exit_code == 2
+    assert "No such option: --json" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1774,7 +1769,7 @@ base_url = "https://my-inspire.internal"
     assert resolution["global_config_path"] == str(global_config)
 
 
-def test_config_check_accepts_local_json_alias(
+def test_config_check_rejects_local_json_alias(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = make_test_config(tmp_path)
@@ -1800,11 +1795,8 @@ def test_config_check_accepts_local_json_alias(
     runner = CliRunner()
     result = runner.invoke(cli_main, ["config", "check", "--json"])
 
-    assert result.exit_code == EXIT_SUCCESS
-    payload = json.loads(result.output)
-    assert payload["success"] is True
-    assert payload["data"]["auth_ok"] is True
-    assert "base_url_resolution" in payload["data"]
+    assert result.exit_code == 2
+    assert "No such option: --json" in result.output
 
 
 def test_config_check_rejects_placeholder_base_url(
@@ -2083,7 +2075,7 @@ def test_notebook_list_all_workspaces_combines_results(
     monkeypatch.setattr(web_session_module, "request_json", fake_request_json)
 
     runner = CliRunner()
-    result = runner.invoke(cli_main, ["notebook", "list", "--all-workspaces", "--all", "--json"])
+    result = runner.invoke(cli_main, ["--json", "notebook", "list", "--all-workspaces", "--all"])
 
     assert result.exit_code == EXIT_SUCCESS
     payload = json.loads(result.output)

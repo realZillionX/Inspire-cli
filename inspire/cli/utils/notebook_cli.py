@@ -23,8 +23,7 @@ def get_base_url() -> str:
 
 
 def resolve_json_output(ctx: Context, json_output: bool) -> bool:
-    if json_output and not ctx.json_output:
-        ctx.json_output = True
+    _ = json_output
     return ctx.json_output
 
 

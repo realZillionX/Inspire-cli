@@ -30,7 +30,7 @@ def notebook():
     \b
     Examples:
         inspire notebook list              # List all instances
-        inspire notebook list --json       # List as JSON
+        inspire --json notebook list       # List as JSON
     """
     pass
 

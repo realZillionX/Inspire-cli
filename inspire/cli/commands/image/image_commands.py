@@ -111,17 +111,10 @@ def _resolve_image_id(
     show_default=True,
     help="Image source filter",
 )
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def list_images_cmd(
     ctx: Context,
     source: str,
-    json_output: bool,
 ) -> None:
     """List available Docker images.
 
@@ -131,9 +124,9 @@ def list_images_cmd(
         inspire image list --source private             # Your custom images
         inspire image list --source personal-visible    # Web UI "personal visible" tab
         inspire image list --source all                 # All sources
-        inspire image list --source all --json          # JSON output
+        inspire --json image list --source all          # JSON output
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -172,26 +165,19 @@ def list_images_cmd(
 
 @click.command("detail")
 @click.argument("image_id")
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def image_detail(
     ctx: Context,
     image_id: str,
-    json_output: bool,
 ) -> None:
     """Show detailed information about an image.
 
     \b
     Examples:
         inspire image detail <image-id>
-        inspire image detail <image-id> --json
+        inspire --json image detail <image-id>
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -253,12 +239,6 @@ def image_detail(
     default=False,
     help="Wait for image to reach READY status",
 )
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def register_image_cmd(
     ctx: Context,
@@ -267,7 +247,6 @@ def register_image_cmd(
     description: str,
     visibility: str,
     wait: bool,
-    json_output: bool,
 ) -> None:
     """Register an external Docker image on the platform.
 
@@ -286,7 +265,7 @@ def register_image_cmd(
         inspire image register -n my-pytorch -v v1.0
         inspire image register -n my-img -v v1.0 --visibility public --wait
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -372,12 +351,6 @@ def register_image_cmd(
     default=False,
     help="Wait for image to reach READY status",
 )
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def save_image_cmd(
     ctx: Context,
@@ -386,7 +359,6 @@ def save_image_cmd(
     version: str,
     description: str,
     wait: bool,
-    json_output: bool,
 ) -> None:
     """Save a running notebook as a custom Docker image.
 
@@ -395,7 +367,7 @@ def save_image_cmd(
         inspire image save <notebook-id> -n my-saved-image
         inspire image save <notebook-id> -n my-img -v v2 --wait
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -452,18 +424,11 @@ def save_image_cmd(
     is_flag=True,
     help="Skip confirmation prompt",
 )
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def delete_image_cmd(
     ctx: Context,
     image_id: str,
     force: bool,
-    json_output: bool,
 ) -> None:
     """Delete a custom Docker image.
 
@@ -472,7 +437,7 @@ def delete_image_cmd(
         inspire image delete <image-id>
         inspire image delete <image-id> --force
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
@@ -530,18 +495,11 @@ def delete_image_cmd(
     default=None,
     help="Set default image for notebooks (written to [notebook].image in .inspire/config.toml)",
 )
-@click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
 @pass_context
 def set_default_image_cmd(
     ctx: Context,
     job_image: Optional[str],
     notebook_image: Optional[str],
-    json_output: bool,
 ) -> None:
     """Save image preferences to .inspire/config.toml.
 
@@ -551,7 +509,7 @@ def set_default_image_cmd(
         inspire image set-default --notebook my-notebook-image
         inspire image set-default --job img1 --notebook img2
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     if not job_image and not notebook_image:
         _handle_error(

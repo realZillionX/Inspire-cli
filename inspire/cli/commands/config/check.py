@@ -19,6 +19,7 @@ from inspire.cli.context import (
 from inspire.cli.formatters import json_formatter
 from inspire.cli.utils.auth import AuthManager, AuthenticationError
 from inspire.cli.utils.errors import exit_with_error as _handle_error
+from inspire.cli.utils.notebook_cli import resolve_json_output
 from inspire.cli.utils.output import emit_error, emit_info, emit_success, emit_warning
 from inspire.config import (
     Config,
@@ -201,10 +202,9 @@ def _build_base_url_resolution(
 # ---------------------------------------------------------------------------
 
 
-def _run_check_impl(ctx: Context, *, json_output_local: bool) -> None:
+def _run_check_impl(ctx: Context) -> None:
     """Run config validation logic without going through Click wrappers."""
-    ctx.json_output = bool(ctx.json_output or json_output_local)
-    effective_json = ctx.json_output
+    effective_json = resolve_json_output(ctx, False)
 
     try:
         cfg, sources = Config.from_files_and_env(
@@ -311,17 +311,11 @@ def _run_check_impl(ctx: Context, *, json_output_local: bool) -> None:
 
 
 @click.command("check")
-@click.option(
-    "--json",
-    "json_output_local",
-    is_flag=True,
-    help="Output as JSON (machine-readable). Equivalent to top-level --json.",
-)
 @pass_context
-def check_config(ctx: Context, json_output_local: bool) -> None:
+def check_config(ctx: Context) -> None:
     """Check environment configuration and API authentication.
 
     Verifies configuration (from files and environment) and attempts to
     authenticate with the Inspire API.
     """
-    _run_check_impl(ctx, json_output_local=json_output_local)
+    _run_check_impl(ctx)

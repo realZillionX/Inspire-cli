@@ -20,7 +20,7 @@ def project():
     \b
     Examples:
         inspire project list          # Show project quota table
-        inspire project list --json   # JSON output with all fields
+        inspire --json project list   # JSON output with all fields
         inspire project select        # Interactive project priority selector
     """
     pass

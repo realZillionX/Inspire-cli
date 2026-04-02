@@ -384,12 +384,6 @@ def _save_project_cache(
 
 @click.command("list")
 @click.option(
-    "--json",
-    "json_output",
-    is_flag=True,
-    help="Alias for global --json",
-)
-@click.option(
     "--all-workspaces",
     "all_workspaces",
     is_flag=True,
@@ -399,7 +393,6 @@ def _save_project_cache(
 @pass_context
 def list_projects_cmd(
     ctx: Context,
-    json_output: bool,
     all_workspaces: bool,
 ) -> None:
     """List projects and their GPU quota.
@@ -407,9 +400,9 @@ def list_projects_cmd(
     \b
     Examples:
         inspire project list          # Show project quota table
-        inspire project list --json   # JSON output with all fields
+        inspire --json project list   # JSON output with all fields
     """
-    json_output = resolve_json_output(ctx, json_output)
+    json_output = resolve_json_output(ctx, False)
 
     session = require_web_session(
         ctx,
