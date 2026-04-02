@@ -13,13 +13,36 @@ Inspire CLI is a command-line tool for the Inspire HPC platform:
 - Launch and SSH into notebook sessions
 - Inspect GPU/node availability
 
-## Public Sync Scope (.gitignore)
+## Public Sync Workflow
 
-Treat `.gitignore` as the source of truth for public-sync boundaries.
+Treat `.gitignore` as the source of truth for private/internal boundaries.
 
-Do not enumerate private/internal file paths in this document. Keep private scope details in local `.gitignore` only.
+Use `bin/sync-github-public.sh` for `github-public` syncs. It enforces an explicit allowlist and prune behavior so removed files in synced paths are deleted from `github-public` too.
 
-When preparing `github-public` sync, verify changed files against `.gitignore` and avoid adding docs/tests/examples that depend on private-only files.
+Allowlist (sync from local `main` to `github-public/main`):
+- `README.md`
+- `CHANGELOG.md`
+- `pyproject.toml`
+- `uv.lock`
+- `inspire/`
+- `tests/`
+
+Post-sync guards enforced by the script:
+- Fail if stale files remain inside allowlist paths (example: `inspire/platform/web/browser_api/notebooks.py`).
+- Fail if `inspire/` changed but `pyproject.toml` or `uv.lock` does not match local `main`.
+
+Recommended command:
+
+```bash
+bin/sync-github-public.sh main github-public/main public-sync
+```
+
+Then review and push:
+
+```bash
+git diff --stat github-public/main..HEAD
+git push github-public public-sync:main
+```
 
 ## Architecture (As of 2026-03-21)
 
