@@ -155,7 +155,6 @@ def test_gpu_resource_spec_prefers_matching_quota_id_when_present() -> None:
     assert spec["cpu_type"] == "cpu-type-main"
 
 
-
 def test_resolve_notebook_quota_prefers_selected_gpu_type_over_loose_pattern() -> None:
     schedule = {
         "quota": [
