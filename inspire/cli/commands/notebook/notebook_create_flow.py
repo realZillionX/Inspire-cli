@@ -472,12 +472,12 @@ def resolve_notebook_quota(
                     break
     else:
         for quota in quota_list:
+            if quota.get("gpu_count") != gpu_count:
+                continue
             quota_gpu_type = quota.get("gpu_type", "")
-            if quota.get("gpu_count") == gpu_count and (
-                quota_gpu_type == selected_gpu_type
-                or match_gpu_type(selected_gpu_type, quota_gpu_type)
-                or match_gpu_type(gpu_pattern, quota_gpu_type)
-            ):
+            if not quota_gpu_type:
+                continue
+            if gpu_pattern == "GPU" or match_gpu_type(gpu_pattern, quota_gpu_type):
                 selected_quota = quota
                 break
 
@@ -506,7 +506,7 @@ def resolve_notebook_quota(
 
             hint = "Available CPU quotas:\n" + "\n".join(lines) if lines else None
         else:
-            message = f"No quota found for {gpu_count}x {selected_gpu_type}"
+            message = f"No quota found for {gpu_count}x {gpu_pattern}"
 
             lines = []
             for quota in quota_list:
@@ -525,6 +525,10 @@ def resolve_notebook_quota(
 
     if gpu_count == 0:
         selected_gpu_type = selected_quota.get("gpu_type", "") or ""
+    else:
+        quota_gpu_type = selected_quota.get("gpu_type", "") or ""
+        if quota_gpu_type:
+            selected_gpu_type = quota_gpu_type
 
     resource_display = format_resource_display(gpu_count, gpu_pattern, cpu_count)
 
@@ -731,16 +735,16 @@ def resolve_notebook_resource_spec_price(
         entry_gpu_count = price_entry.get("gpu_count", 0)
         entry_gpu_info = price_entry.get("gpu_info", {})
         entry_gpu_type = entry_gpu_info.get("gpu_type", "")
+        entry_quota_id = price_entry.get("quota_id", "")
         entry_cpu_info = price_entry.get("cpu_info", {})
 
         if entry_gpu_count != gpu_count:
             continue
-        if not (
-            not selected_gpu_type
-            or entry_gpu_type == selected_gpu_type
-            or match_gpu_type(selected_gpu_type, entry_gpu_type)
-            or match_gpu_type(gpu_pattern, entry_gpu_type)
-        ):
+        if not entry_gpu_type:
+            continue
+        if gpu_pattern != "GPU" and not match_gpu_type(gpu_pattern, entry_gpu_type):
+            continue
+        if quota_id and entry_quota_id and entry_quota_id != quota_id:
             continue
 
         resource_spec_price = {
@@ -750,10 +754,10 @@ def resolve_notebook_resource_spec_price(
             "gpu_count": entry_gpu_count,
             "memory_size_gib": price_entry.get("memory_size_gib", memory_size),
             "logic_compute_group_id": logic_compute_group_id,
-            "quota_id": price_entry.get("quota_id", quota_id),
+            "quota_id": entry_quota_id or quota_id,
         }
         if not quota_id:
-            quota_id = price_entry.get("quota_id", "")
+            quota_id = entry_quota_id
         cpu_count = price_entry.get("cpu_count", cpu_count)
         mem_gib = price_entry.get("memory_size_gib")
         if mem_gib is not None:
@@ -808,6 +812,9 @@ def create_notebook_and_report(
         notebook_id = result.get("notebook_id", "")
 
         if json_output:
+            workspace_name = (getattr(session, "all_workspace_names", None) or {}).get(
+                workspace_id, ""
+            )
             click.echo(
                 json_formatter.format_json(
                     {
@@ -816,6 +823,9 @@ def create_notebook_and_report(
                         "resource": resource_display,
                         "project": selected_project.name,
                         "image": selected_image.name,
+                        "logic_compute_group_id": logic_compute_group_id,
+                        "workspace_id": workspace_id,
+                        "workspace_name": workspace_name,
                     }
                 )
             )
