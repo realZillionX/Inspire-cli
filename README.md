@@ -1,113 +1,59 @@
-中文 | [**English**](README.en.md)
+# Inspire-cli 已归档 · This repository is archived
 
-# Inspire CLI
+> ## ⚠️ 这个仓库不再更新。请迁移到 **[InspireSkill](https://github.com/realZillionX/InspireSkill)**。
+> ## ⚠️ This repo is no longer maintained — please switch to **[InspireSkill](https://github.com/realZillionX/InspireSkill)**.
 
-启智（Inspire）训练平台命令行工具 —— Notebook 管理、分布式训练 / 高性能计算提交、SSH 隧道、镜像管理、代码同步一站式解决。
+---
 
-> **README 边界：** 本文档只保留安装与一次性配置。
->
-> **完整操作手册：** [Inspire Skill - 启智平台全流程操作手册](https://fudan-nlp.feishu.cn/wiki/D2RXwnZcQiUQadkadJgcC1aEnLh)
->
-> **机密网络配置：** [Clash 7897 网络配置方法](https://fudan-nlp.feishu.cn/wiki/NDvbw0TZPiiNT2k1DzmcMovHnoc)
+## 为什么换仓库
 
-## 安装
+原来的 `Inspire-cli` 只是一个命令行工具；新仓库 **InspireSkill** 把同一个 CLI 重新打包成**面向 Agent 的 skill + CLI 双层包**，并做了一轮大规模适配 / 升级：
+
+- **Agent skill 层**：`SKILL.md` + `references/` 被安装脚本自动拷进 Claude Code / Codex CLI / Gemini CLI / OpenClaw / OpenCode 的 skills 目录，Agent 可直接作为黑盒驱动 CLI，不用你手打命令
+- **命令面扩展**：新增 `inspire serving` / `inspire model` / `inspire user` / `inspire project detail|owners` / `inspire notebook events` / `inspire notebook lifecycle` —— 覆盖 Browser API 上的观测性和用户信息端点
+- **端点自适应**：`POST /notebook/events` / `/run_index/list` / `logic_compute_groups/list` 等 2026-04 平台升级后更新的新路径已全部重新封装；老的 `/notebook/{id}/events` 路径 InspireSkill 自动走新路
+- **可靠性改进**：事件自动分页（曾经截断只返 200，现在拉全量）、参数类型校验（拒 `bool` / 非整 `float` 悄悄进 payload）、OpenAPI 错误友好翻译
+- **反向抓包工具链**：`cli/scripts/reverse_capture/` —— Playwright 驱动的 `/api/v1/*` 扫描器 + 已知端点 diff，平台下次悄悄改路径时几分钟定位
+- **零漂移同步**：`inspire update` 一条命令同时刷新 CLI 和 skill，维护者持续跟进平台变更
+- **代理方案中立**：可选 Clash Verge 7897 模板，但 CLI 本身不绑定，任意覆盖公网 + `*.sii.edu.cn` 的代理都能接
+
+完整能力、安装、harness 支持见新仓库 README：<https://github.com/realZillionX/InspireSkill>
+
+---
+
+## 迁移（Migration）
 
 ```bash
-# 通过 SSH（推荐）
-uv tool install git+ssh://git@github.com/realZillionX/Inspire-cli.git
+# 如果你之前用 pip/pipx 装了 inspire-cli 请先卸载
+pipx uninstall inspire-cli 2>/dev/null || pip uninstall -y inspire-cli 2>/dev/null || true
 
-# 或通过 HTTPS
-uv tool install git+https://github.com/realZillionX/Inspire-cli.git
+# 安装新版
+curl -fsSL https://raw.githubusercontent.com/realZillionX/InspireSkill/main/scripts/install.sh | bash
 ```
 
-### 本地开发
+命令名仍是 `inspire`，日常子命令（`notebook` / `job` / `hpc` / `image` / `resources`）语义保持兼容，可以无缝切。
+
+---
+
+## Why the switch (English)
+
+The old `Inspire-cli` was just a command-line tool. **InspireSkill** repackages the same CLI as a **dual-layer agent skill + CLI**, adding:
+
+- **Agent skill layer** — `SKILL.md` and `references/` auto-installed into Claude Code / Codex / Gemini CLI / OpenClaw / OpenCode so your agent drives the CLI as a black box without you typing commands.
+- **New command surface** — `serving`, `model`, `user`, `project detail|owners`, `notebook events`, `notebook lifecycle`, covering Browser API observability + user-info endpoints that were never wrapped before.
+- **Platform drift caught** — paths that changed in the 2026-04 platform upgrade (`POST /notebook/events`, `/run_index/list`, `logic_compute_groups/list`) are already re-wrapped.
+- **Reliability upgrades** — event auto-pagination (used to silently truncate at 200), strict param validation, friendlier API-error translation.
+- **Reverse-capture toolkit** — Playwright-based `/api/v1/*` scanner + known-endpoint diff, so the next platform change is minutes away from being re-mapped.
+- **Zero-drift sync** — `inspire update` refreshes CLI and skill together; maintainer actively tracks upstream.
+
+Install:
 
 ```bash
-uv tool install -e .
-inspire --help
+curl -fsSL https://raw.githubusercontent.com/realZillionX/InspireSkill/main/scripts/install.sh | bash
 ```
 
-## 一次性配置
+---
 
-| 步骤 | 操作 | 说明 |
-| --- | --- | --- |
-| 1. 网络前置 | 参考上方飞书文档 | 仅在本机不能直连 `*.sii.edu.cn` 时需要 |
-| 2. 自动发现 | `inspire init --discover -u <用户名> --base-url https://qz.sii.edu.cn` | 自动写入全局配置 `~/.config/inspire/config.toml` 和项目配置 `./.inspire/config.toml` |
-| 3. 检查结果 | `inspire config show` / `inspire config check` | 查看合并后的配置并校验认证链路 |
+## 这个仓库会保留做什么
 
-补充说明：
-
-- `INSPIRE_PASSWORD` 可以临时 `export`，也可以持久写进 shell 启动文件；若希望按账号长期保存，也可直接写入 `~/.config/inspire/config.toml` 的 `[accounts."<用户名>"].password`。
-- 默认 `discover` 已经会尽量发现 `workdir` 和 `shared_path_group`。
-- 只有当输出里仍有未知 shared path 时，再加 `--probe-shared-path` 做慢速补全；它会创建临时 `CPU notebook`。
-
-## 配置文件
-
-| 层级 | 默认路径 | 用途 |
-| --- | --- | --- |
-| 全局配置 | `~/.config/inspire/config.toml` | 账号、密码、基础 URL，以及少量机器级配置 |
-| 项目配置 | `./.inspire/config.toml` | `discover` 自动写入的项目、workspace、compute group 等项目级元数据 |
-| 环境变量 | 当前 shell / CI 环境 | 临时覆盖或敏感值兜底 |
-
-默认合并顺序是 `默认值 < 全局 TOML < 项目 TOML < 环境变量`。若项目配置里设置 `cli.prefer_source = "toml"`，则冲突时改为项目 TOML 优先。
-
-最小全局配置示例：
-
-```toml
-[auth]
-username = "your_username"
-
-[accounts."your_username"]
-password = "your_password"
-
-[api]
-base_url = "https://qz.sii.edu.cn"
-```
-
-## 内置代理配置
-
-`Inspire-cli` 本身支持按流量类型分别配置代理，不必强依赖系统级 `HTTP_PROXY`。这类设置通常应该写在全局配置 `~/.config/inspire/config.toml`。
-
-推荐示例：
-
-```toml
-[api]
-base_url = "https://qz.sii.edu.cn"
-force_proxy = true  # 仅在 system/no_proxy 绕过代理时需要
-
-[proxy]
-requests_http = "http://127.0.0.1:7897"
-requests_https = "http://127.0.0.1:7897"
-playwright = "http://127.0.0.1:7897"  # 可省略；未设置时回退到 requests 代理
-rtunnel = "http://127.0.0.1:7897"     # 可省略；未设置时回退到 requests 代理
-```
-
-| 配置项 | 作用范围 | 对应环境变量 |
-| --- | --- | --- |
-| `[proxy].requests_http` / `[proxy].requests_https` | OpenAPI、Web Session、普通 `requests` 流量 | `INSPIRE_REQUESTS_HTTP_PROXY` / `INSPIRE_REQUESTS_HTTPS_PROXY` |
-| `[proxy].playwright` | Playwright 浏览器自动化登录、页面抓取 | `INSPIRE_PLAYWRIGHT_PROXY` |
-| `[proxy].rtunnel` | `notebook ssh`、`bridge ssh`、`bridge exec` 的 `rtunnel` / `SSH ProxyCommand` | `INSPIRE_RTUNNEL_PROXY` |
-| `[api].force_proxy` | 对 OpenAPI 请求强制启用已解析出的代理，避免被 `no_proxy` 或系统代理规则绕过 | `INSPIRE_FORCE_PROXY` |
-
-补充说明：
-
-- 若 `playwright` 或 `rtunnel` 没单独设置，默认会回退到 `requests` 代理。
-- 若只想临时验证，先 `export` 对应环境变量即可；再用 `inspire config show --compact` 查看最终生效值和来源。
-- 想看包含代理项在内的完整环境变量模板，请运行 `inspire config env --template full`。
-
-项目级默认镜像、远端路径和共享目录约定，建议写在项目自己的 `AGENTS.md`，不要继续堆在 README 里。
-
-## 常用环境变量
-
-更完整的列表请运行 `inspire config env --template full`。
-
-| 变量 | 说明 |
-| --- | --- |
-| `INSPIRE_USERNAME` | 平台用户名 |
-| `INSPIRE_PASSWORD` | 平台密码兜底 |
-| `INSPIRE_BASE_URL` | API 基地址 |
-| `INSPIRE_REQUESTS_HTTP_PROXY` / `INSPIRE_REQUESTS_HTTPS_PROXY` | `requests` / OpenAPI 代理 |
-| `INSPIRE_PLAYWRIGHT_PROXY` | Playwright 代理 |
-| `INSPIRE_RTUNNEL_PROXY` | `rtunnel` / `SSH ProxyCommand` 代理 |
-| `INSPIRE_FORCE_PROXY` | 强制 OpenAPI 使用已解析出的代理 |
-| `INSPIRE_GLOBAL_CONFIG_PATH` | 全局配置文件路径覆盖 |
+只做**归档**。不再接 issue / PR，不再发版本。有问题请去新仓库：<https://github.com/realZillionX/InspireSkill/issues>。
