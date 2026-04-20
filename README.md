@@ -1,7 +1,8 @@
-# Inspire-cli 已归档 · This repository is archived
+中文 | [**English**](README.en.md)
+
+# Inspire-cli 已归档
 
 > ## ⚠️ 这个仓库不再更新。请迁移到 **[InspireSkill](https://github.com/realZillionX/InspireSkill)**。
-> ## ⚠️ This repo is no longer maintained — please switch to **[InspireSkill](https://github.com/realZillionX/InspireSkill)**.
 
 ---
 
@@ -21,7 +22,7 @@
 
 ---
 
-## 迁移（Migration）
+## 迁移
 
 ```bash
 # 如果你之前用 pip/pipx 装了 inspire-cli 请先卸载
@@ -32,25 +33,6 @@ curl -fsSL https://raw.githubusercontent.com/realZillionX/InspireSkill/main/scri
 ```
 
 命令名仍是 `inspire`，日常子命令（`notebook` / `job` / `hpc` / `image` / `resources`）语义保持兼容，可以无缝切。
-
----
-
-## Why the switch (English)
-
-The old `Inspire-cli` was just a command-line tool. **InspireSkill** repackages the same CLI as a **dual-layer agent skill + CLI**, adding:
-
-- **Agent skill layer** — `SKILL.md` and `references/` auto-installed into Claude Code / Codex / Gemini CLI / OpenClaw / OpenCode so your agent drives the CLI as a black box without you typing commands.
-- **New command surface** — `serving`, `model`, `user`, `project detail|owners`, `notebook events`, `notebook lifecycle`, covering Browser API observability + user-info endpoints that were never wrapped before.
-- **Platform drift caught** — paths that changed in the 2026-04 platform upgrade (`POST /notebook/events`, `/run_index/list`, `logic_compute_groups/list`) are already re-wrapped.
-- **Reliability upgrades** — event auto-pagination (used to silently truncate at 200), strict param validation, friendlier API-error translation.
-- **Reverse-capture toolkit** — Playwright-based `/api/v1/*` scanner + known-endpoint diff, so the next platform change is minutes away from being re-mapped.
-- **Zero-drift sync** — `inspire update` refreshes CLI and skill together; maintainer actively tracks upstream.
-
-Install:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/realZillionX/InspireSkill/main/scripts/install.sh | bash
-```
 
 ---
 
